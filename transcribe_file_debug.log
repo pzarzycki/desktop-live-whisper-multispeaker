@@ -1,0 +1,6 @@
+
+=== run at Sat Oct  4 03:24:07 2025
+argv: [0]=C:\PRJ\VAM\desktop-live-whisper-multiplatform\build\tests-only-debug\app_transcribe_file.exe [1]=-v [2]=C:\PRJ\VAM\desktop-live-whisper-multiplatform\third_party\whisper.cpp\samples\jfk.wav
+
+=== run at Sat Oct  4 03:26:49 2025
+argv: [0]=C:\PRJ\VAM\desktop-live-whisper-multiplatform\build\tests-only-debug\app_transcribe_file.exe [1]=-v [2]=--model [3]=C:\PRJ\VAM\desktop-live-whisper-multiplatform\third_party\whisper.cpp\models\ggml-small.en.bin [4]=C:\PRJ\VAM\desktop-live-whisper-multiplatform\third_party\whisper.cpp\samples\jfk.wav
