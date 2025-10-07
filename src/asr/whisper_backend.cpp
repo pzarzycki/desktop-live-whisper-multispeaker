@@ -205,6 +205,99 @@ std::string WhisperBackend::transcribe_chunk(const int16_t* data, size_t samples
 #endif
 }
 
+std::vector<WhisperSegment> WhisperBackend::transcribe_chunk_segments(const int16_t* data, size_t samples) {
+#if defined(WHISPER_BACKEND_AVAILABLE)
+	std::vector<WhisperSegment> segments;
+	if (!g_ws.ctx || !data || samples == 0) return segments;
+	
+	// Use EXACT same parameters as transcribe_chunk for consistency
+	whisper_full_params wparams = whisper_full_default_params(WHISPER_SAMPLING_GREEDY);
+	wparams.print_realtime   = false; // Don't print during transcription
+	wparams.print_progress   = false;
+	wparams.print_timestamps = false;
+	wparams.print_special    = false;
+	wparams.translate        = false;
+	wparams.language         = "en";
+	wparams.detect_language  = false;
+	wparams.n_threads        = (g_ws.n_threads == 0) ? std::max(1u, std::thread::hardware_concurrency()) : g_ws.n_threads;
+	wparams.offset_ms        = 0;
+	wparams.duration_ms      = 0;
+	wparams.token_timestamps = false;
+	wparams.max_len          = 0;
+	wparams.split_on_word    = false;
+	wparams.audio_ctx        = 0;
+	wparams.greedy.best_of   = 1;
+	
+	std::vector<float> pcm_f32;
+	pcm_f32.reserve(samples);
+	constexpr float scale = 1.0f / 32768.0f;
+	for (size_t i = 0; i < samples; ++i) {
+		pcm_f32.push_back(static_cast<float>(data[i]) * scale);
+	}
+	
+	int ret = 0;
+	if (g_ws.state) {
+		ret = whisper_full_with_state(g_ws.ctx, g_ws.state, wparams, pcm_f32.data(), (int)pcm_f32.size());
+	} else {
+		ret = whisper_full(g_ws.ctx, wparams, pcm_f32.data(), (int)pcm_f32.size());
+	}
+	if (ret != 0) {
+		std::cerr << "[whisper] whisper_full FAILED, ret=" << ret << "\n";
+		return segments;
+	}
+	
+	int n = 0;
+	if (g_ws.state) {
+		n = whisper_full_n_segments_from_state(g_ws.state);
+	} else {
+		n = whisper_full_n_segments(g_ws.ctx);
+	}
+	
+	for (int i = 0; i < n; ++i) {
+		const char* txt = nullptr;
+		int64_t t0 = 0, t1 = 0;
+		
+		if (g_ws.state) {
+			txt = whisper_full_get_segment_text_from_state(g_ws.state, i);
+			t0 = whisper_full_get_segment_t0_from_state(g_ws.state, i);
+			t1 = whisper_full_get_segment_t1_from_state(g_ws.state, i);
+		} else {
+			txt = whisper_full_get_segment_text(g_ws.ctx, i);
+			t0 = whisper_full_get_segment_t0(g_ws.ctx, i);
+			t1 = whisper_full_get_segment_t1(g_ws.ctx, i);
+		}
+		
+		if (txt) {
+			std::string s(txt);
+			// Trim whitespace
+			auto trim = [](std::string& x){
+				size_t a = x.find_first_not_of(" \t\r\n");
+				size_t b = x.find_last_not_of(" \t\r\n");
+				if (a == std::string::npos) { x.clear(); return; }
+				x = x.substr(a, b - a + 1);
+			};
+			trim(s);
+			// Filter silence markers
+			if (s == "[BLANK_AUDIO]" || s == "[ Silence ]" || s == "[silence]" || s == "[ Silence]" ) {
+				continue;
+			}
+			if (!s.empty()) {
+				WhisperSegment seg;
+				seg.text = s;
+				seg.t0_ms = t0 * 10; // Whisper returns in centiseconds (10ms units)
+				seg.t1_ms = t1 * 10;
+				segments.push_back(seg);
+			}
+		}
+	}
+	
+	return segments;
+#else
+	std::cerr << "[whisper] backend not available; returning no segments.\n";
+	return std::vector<WhisperSegment>();
+#endif
+}
+
 void WhisperBackend::set_threads(int n) {
 #if defined(WHISPER_BACKEND_AVAILABLE)
 	if (n <= 0) {

@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <complex>
 #include <vector>
+#include <map>
 
 namespace diar {
 
@@ -145,6 +146,12 @@ std::vector<float> compute_logmel_embedding(const int16_t* pcm16, size_t samples
     return mel;
 }
 
+// Wrapper: compute_speaker_embedding uses compute_logmel_embedding with good defaults
+std::vector<float> compute_speaker_embedding(const int16_t* pcm16, size_t samples, int sample_rate) {
+    // Use 40 mel filters for speaker discrimination
+    return compute_logmel_embedding(pcm16, samples, sample_rate, 40);
+}
+
 int SpeakerClusterer::assign(const std::vector<float>& emb) {
     if (emb.empty()) return m_current_speaker >= 0 ? m_current_speaker : -1;
     
@@ -236,8 +243,305 @@ int SpeakerClusterer::assign(const std::vector<float>& emb) {
         m_frames_since_change = 0;
         return best;
     }
-    
+
     return -1;
+}
+
+// ============================================================================
+// Whisper-first Post-Processing: Assign speakers to transcribed segments
+// ============================================================================
+
+std::vector<TranscriptSegment> assign_speakers_to_segments(
+    const std::vector<TranscriptSegment>& whisper_segments,
+    const int16_t* audio,
+    size_t total_samples,
+    int sample_rate,
+    int max_speakers,
+    bool verbose
+) {
+    if (whisper_segments.empty() || !audio || total_samples == 0) {
+        return whisper_segments;
+    }
+    
+    std::vector<TranscriptSegment> result;
+    SpeakerClusterer clusterer(max_speakers, 0.60f, verbose);
+    
+    // Process each Whisper segment
+    for (const auto& seg : whisper_segments) {
+        int64_t duration_ms = seg.t1_ms - seg.t0_ms;
+        
+        // For short segments (<1s), analyze as single unit
+        if (duration_ms < 1000) {
+            size_t start_sample = (seg.t0_ms * sample_rate) / 1000;
+            size_t end_sample = (seg.t1_ms * sample_rate) / 1000;
+            
+            if (end_sample > total_samples) end_sample = total_samples;
+            if (start_sample >= end_sample) continue;
+            
+            size_t seg_samples = end_sample - start_sample;
+            auto embedding = compute_speaker_embedding(audio + start_sample, seg_samples, sample_rate);
+            
+            int speaker = clusterer.assign(embedding);
+            
+            TranscriptSegment out = seg;
+            out.speaker_id = speaker;
+            result.push_back(out);
+            
+            if (verbose) {
+                fprintf(stderr, "[Diar] Short segment [%lld-%lld ms]: assigned S%d\n",
+                        seg.t0_ms, seg.t1_ms, speaker);
+            }
+            continue;
+        }
+        
+        // For longer segments (>=1s), use sliding windows for majority vote
+        // NOTE: We do NOT split segments because we can't split the text properly
+        //       Keep Whisper's excellent transcription intact, just assign speaker
+        const int64_t window_ms = 1000;   // 1s analysis window
+        const int64_t hop_ms = 500;       // 0.5s hop (50% overlap)
+        
+        std::vector<int> frame_speakers;
+        
+        // Analyze segment with sliding windows
+        for (int64_t t = seg.t0_ms; t < seg.t1_ms; t += hop_ms) {
+            int64_t win_start = t;
+            int64_t win_end = t + window_ms;
+            
+            // Clamp to segment bounds
+            if (win_end > seg.t1_ms) win_end = seg.t1_ms;
+            if (win_end - win_start < 500) break;  // Need at least 0.5s
+            
+            size_t start_sample = (win_start * sample_rate) / 1000;
+            size_t end_sample = (win_end * sample_rate) / 1000;
+            
+            if (end_sample > total_samples) end_sample = total_samples;
+            if (start_sample >= end_sample) break;
+            
+            size_t win_samples = end_sample - start_sample;
+            auto embedding = compute_speaker_embedding(audio + start_sample, win_samples, sample_rate);
+            
+            int speaker = clusterer.assign(embedding);
+            frame_speakers.push_back(speaker);
+            
+            if (verbose) {
+                fprintf(stderr, "[Diar] Window [%lld-%lld ms]: S%d\n", win_start, win_end, speaker);
+            }
+        }
+        
+        if (frame_speakers.empty()) {
+            // Fallback: treat as single segment
+            TranscriptSegment out = seg;
+            out.speaker_id = -1;
+            result.push_back(out);
+            continue;
+        }
+        
+        // Assign speaker based on majority vote (DO NOT split text!)
+        std::map<int, int> vote_counts;
+        for (int spk : frame_speakers) {
+            vote_counts[spk]++;
+        }
+        
+        int majority_speaker = frame_speakers[0];
+        int max_votes = 0;
+        for (const auto& [spk, count] : vote_counts) {
+            if (count > max_votes) {
+                max_votes = count;
+                majority_speaker = spk;
+            }
+        }
+        
+        TranscriptSegment out = seg;
+        out.speaker_id = majority_speaker;
+        result.push_back(out);
+        
+        if (verbose) {
+            fprintf(stderr, "[Diar] Long segment [%lld-%lld ms]: S%d (majority vote)\n",
+                    seg.t0_ms, seg.t1_ms, majority_speaker);
+        }
+    }
+    
+    return result;
+}
+
+// ============================================================================
+// Phase 2: ContinuousFrameAnalyzer Implementation
+// ============================================================================
+
+ContinuousFrameAnalyzer::ContinuousFrameAnalyzer(int sample_rate, const Config& config)
+    : m_sample_rate(sample_rate)
+    , m_config(config)
+    , m_total_samples_processed(0)
+    , m_next_frame_ms(config.window_ms / 2)  // Start at window_ms/2 so first window fits
+{
+    if (m_config.verbose) {
+        fprintf(stderr, "[ContinuousFrameAnalyzer] Init: hop=%dms, window=%dms, history=%ds, sr=%d, first_frame=%lldms\n",
+                m_config.hop_ms, m_config.window_ms, m_config.history_sec, m_sample_rate, m_next_frame_ms);
+    }
+}
+
+ContinuousFrameAnalyzer::~ContinuousFrameAnalyzer() {
+    if (m_config.verbose) {
+        fprintf(stderr, "[ContinuousFrameAnalyzer] Cleanup: extracted %zu frames over %.1fs\n",
+                m_frames.size(), duration_ms() / 1000.0);
+    }
+}
+
+int64_t ContinuousFrameAnalyzer::samples_to_ms(size_t samples) const {
+    return (samples * 1000) / m_sample_rate;
+}
+
+size_t ContinuousFrameAnalyzer::ms_to_samples(int64_t ms) const {
+    return (ms * m_sample_rate) / 1000;
+}
+
+int ContinuousFrameAnalyzer::add_audio(const int16_t* samples, size_t n_samples) {
+    if (n_samples == 0) return 0;
+    
+    // Append to buffer
+    m_audio_buffer.insert(m_audio_buffer.end(), samples, samples + n_samples);
+    m_total_samples_processed += n_samples;
+    
+    int frames_extracted = 0;
+    int64_t current_ms = samples_to_ms(m_total_samples_processed);
+    
+    static int debug_call_count = 0;
+    if (m_config.verbose && debug_call_count < 10) {
+        fprintf(stderr, "[add_audio #%d] n_samples=%zu, buffer_size=%zu, total_ms=%lld, next_frame=%lld\n",
+                ++debug_call_count, n_samples, m_audio_buffer.size(), current_ms, m_next_frame_ms);
+    }
+    
+    // Extract frames at regular intervals (hop_ms)
+    while (m_next_frame_ms <= current_ms) {
+        // Need enough audio for the window
+        int64_t window_start_ms = m_next_frame_ms - m_config.window_ms / 2;
+        int64_t window_end_ms = m_next_frame_ms + m_config.window_ms / 2;
+        
+        // Can only extract if we've processed enough audio for the full window
+        if (window_end_ms > current_ms) {
+            // Not enough audio yet, wait for more
+            break;
+        }
+        
+        // Check if we have enough audio in buffer (accounting for trimming)
+        int64_t buffer_start_ms = samples_to_ms(m_total_samples_processed - m_audio_buffer.size());
+        int64_t buffer_end_ms = samples_to_ms(m_total_samples_processed);
+        
+        if (m_config.verbose && m_frames.size() < 3) {
+            fprintf(stderr, "[window_check] next_frame=%lld, window=[%lld,%lld], buffer=[%lld,%lld], check=%d\n",
+                    m_next_frame_ms, window_start_ms, window_end_ms, buffer_start_ms, buffer_end_ms,
+                    (window_start_ms >= buffer_start_ms && window_end_ms <= buffer_end_ms));
+        }
+        
+        if (window_start_ms >= buffer_start_ms && window_end_ms <= buffer_end_ms) {
+            Frame frame = extract_frame_at_ms(m_next_frame_ms);
+            m_frames.push_back(frame);
+            frames_extracted++;
+            
+            if (m_config.verbose && frames_extracted <= 5) {
+                fprintf(stderr, "[Frame] t=%lld ms, emb_dim=%zu\n", 
+                        frame.t_start_ms, frame.embedding.size());
+            }
+        } else {
+            // Buffer was trimmed too much, can't extract this frame
+            if (m_config.verbose && m_frames.size() < 5) {
+                fprintf(stderr, "[skip_frame] t=%lld: window [%lld,%lld] not in buffer [%lld,%lld]\n",
+                        m_next_frame_ms, window_start_ms, window_end_ms, buffer_start_ms, buffer_end_ms);
+            }
+        }
+        
+        m_next_frame_ms += m_config.hop_ms;
+        
+        // Safety: if we're way ahead, stop
+        if (m_next_frame_ms > current_ms + m_config.hop_ms * 10) break;
+    }
+    
+    // Trim old frames to maintain history limit
+    if (m_config.history_sec > 0) {
+        int64_t cutoff_ms = current_ms - (m_config.history_sec * 1000);
+        clear_old_frames(cutoff_ms);
+    }
+    
+    // Trim audio buffer (keep last 2*window_ms for overlap)
+    size_t samples_to_keep = ms_to_samples(m_config.window_ms * 2);
+    if (m_audio_buffer.size() > samples_to_keep + ms_to_samples(m_config.hop_ms * 10)) {
+        size_t trim = m_audio_buffer.size() - samples_to_keep;
+        m_audio_buffer.erase(m_audio_buffer.begin(), m_audio_buffer.begin() + trim);
+    }
+    
+    return frames_extracted;
+}
+
+ContinuousFrameAnalyzer::Frame ContinuousFrameAnalyzer::extract_frame_at_ms(int64_t center_ms) {
+    Frame frame;
+    frame.t_start_ms = center_ms - m_config.window_ms / 2;
+    frame.t_end_ms = center_ms + m_config.window_ms / 2;
+    frame.speaker_id = -1;  // Unknown initially
+    frame.confidence = 0.0f;
+    
+    // Calculate which part of buffer to extract
+    int64_t buffer_start_ms = samples_to_ms(m_total_samples_processed - m_audio_buffer.size());
+    size_t offset_samples = ms_to_samples(frame.t_start_ms - buffer_start_ms);
+    size_t window_samples = ms_to_samples(m_config.window_ms);
+    
+    // Bounds check
+    if (offset_samples + window_samples > m_audio_buffer.size()) {
+        // Not enough audio - return empty frame
+        if (m_config.verbose) {
+            fprintf(stderr, "[Frame] WARNING: Not enough audio for frame at %lld ms\n", center_ms);
+        }
+        return frame;
+    }
+    
+    // Extract embedding from this window
+    const int16_t* window_audio = m_audio_buffer.data() + offset_samples;
+    frame.embedding = compute_speaker_embedding(window_audio, window_samples, m_sample_rate);
+    
+    return frame;
+}
+
+std::vector<ContinuousFrameAnalyzer::Frame> 
+ContinuousFrameAnalyzer::get_frames_in_range(int64_t t0_ms, int64_t t1_ms) const {
+    std::vector<Frame> result;
+    
+    for (const auto& frame : m_frames) {
+        // Frame overlaps with range if:
+        // frame.t_start_ms < t1_ms AND frame.t_end_ms > t0_ms
+        if (frame.t_start_ms < t1_ms && frame.t_end_ms > t0_ms) {
+            result.push_back(frame);
+        }
+    }
+    
+    return result;
+}
+
+const ContinuousFrameAnalyzer::Frame* ContinuousFrameAnalyzer::get_latest_frame() const {
+    if (m_frames.empty()) return nullptr;
+    return &m_frames.back();
+}
+
+void ContinuousFrameAnalyzer::clear_old_frames(int64_t before_ms) {
+    // Remove frames older than before_ms
+    while (!m_frames.empty() && m_frames.front().t_end_ms < before_ms) {
+        m_frames.pop_front();
+    }
+}
+
+void ContinuousFrameAnalyzer::update_speaker_ids(const std::vector<int>& speaker_ids) {
+    if (speaker_ids.size() != m_frames.size()) {
+        fprintf(stderr, "[ContinuousFrameAnalyzer] ERROR: speaker_ids size mismatch: %zu vs %zu frames\n",
+                speaker_ids.size(), m_frames.size());
+        return;
+    }
+    
+    for (size_t i = 0; i < m_frames.size(); ++i) {
+        m_frames[i].speaker_id = speaker_ids[i];
+    }
+}
+
+int64_t ContinuousFrameAnalyzer::duration_ms() const {
+    if (m_frames.empty()) return 0;
+    return m_frames.back().t_end_ms - m_frames.front().t_start_ms;
 }
 
 } // namespace diar

@@ -6,7 +6,7 @@ There's a ready script to activate dev variables for currently installed VS Buil
 
 ## Project Documentation
 
-Document all important architectural decisions, design artifacts, and tasks in the `specs/architecture.md`.
+Document all important architectural decisions, design artifacts, and tasks in the `specs/architecture.md` and `specs/continuous_architecture_findings.md`.
 This file should be updated as the project evolves.
 
 Document there all important findings and changes to the architecture, tech stack, libraries, and project structure.
