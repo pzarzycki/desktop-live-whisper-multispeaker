@@ -113,10 +113,33 @@ if(NOT BUILD_APP)
     # Ensure output TU is compiled as C++
     set_source_files_properties(src/audio/windows_wasapi_out.cpp PROPERTIES LANGUAGE CXX)
 
+    # Speaker diarization library
     add_library(diarization STATIC
         src/diar/speaker_cluster.cpp
+        src/diar/onnx_embedder.cpp
     )
     target_include_directories(diarization PUBLIC src)
+    
+    # Link ONNX Runtime (using prebuilt binaries from third_party)
+    set(ONNXRUNTIME_ROOT "${CMAKE_SOURCE_DIR}/third_party/onnxruntime")
+    if (EXISTS "${ONNXRUNTIME_ROOT}/include")
+        target_include_directories(diarization PRIVATE "${ONNXRUNTIME_ROOT}/include")
+        target_link_libraries(diarization PUBLIC "${ONNXRUNTIME_ROOT}/lib/onnxruntime.lib")
+        target_compile_definitions(diarization PUBLIC ONNX_AVAILABLE=1)
+        message(STATUS "Using ONNX Runtime from ${ONNXRUNTIME_ROOT}")
+        
+        # Copy ONNX Runtime DLLs to output directory
+        add_custom_command(TARGET diarization POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${ONNXRUNTIME_ROOT}/lib/onnxruntime.dll"
+                "$<TARGET_FILE_DIR:diarization>"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${ONNXRUNTIME_ROOT}/lib/onnxruntime_providers_shared.dll"
+                "$<TARGET_FILE_DIR:diarization>"
+        )
+    else()
+        message(FATAL_ERROR "ONNX Runtime not found. Run: ./scripts/download_onnxruntime.ps1")
+    endif()
 
     add_executable(app_transcribe_file
         src/console/transcribe_file.cpp

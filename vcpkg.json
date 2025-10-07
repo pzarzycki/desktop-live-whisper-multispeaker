@@ -1,6 +1,7 @@
 {
   "name": "desktop-live-whisper",
   "version-string": "0.1.0",
+  "builtin-baseline": "c82ec7e6c9b25fb9afc5c98a59f3a2dc33e30a9d",
   "dependencies": [
     "qtbase",
     "qtdeclarative",

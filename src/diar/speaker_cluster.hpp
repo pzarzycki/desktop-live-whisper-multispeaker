@@ -3,11 +3,19 @@
 #include <cstdint>
 #include <string>
 #include <deque>
+#include <memory>
 
 namespace diar {
 
 // Forward declarations
 class SpeakerClusterer;
+class OnnxSpeakerEmbedder;
+
+// Embedding extraction mode
+enum class EmbeddingMode {
+    HandCrafted,  // 53-dim MFCC+Delta+Pitch+Formants (Phase 2b)
+    NeuralONNX    // 192-dim ECAPA-TDNN neural embeddings (Phase 2c)
+};
 
 // Speaker change point with timestamp
 struct SpeakerSegment {
@@ -97,6 +105,8 @@ public:
         int hop_ms = 250;       // Extract embedding every 250ms (4 fps)
         int window_ms = 1000;   // Use 1s window for each embedding
         int history_sec = 60;   // Keep last 60 seconds of frames
+        EmbeddingMode embedding_mode = EmbeddingMode::NeuralONNX;  // Use neural embeddings
+        std::string onnx_model_path = "models/speaker_embedding.onnx";
         bool verbose = false;
     };
     
@@ -146,6 +156,9 @@ private:
     
     // Next frame extraction time
     int64_t m_next_frame_ms;
+    
+    // ONNX embedder (lazy-initialized)
+    std::unique_ptr<OnnxSpeakerEmbedder> m_onnx_embedder;
     
     // Extract frame at specific time point
     Frame extract_frame_at_ms(int64_t center_ms);

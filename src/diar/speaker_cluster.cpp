@@ -1,4 +1,5 @@
 #include "diar/speaker_cluster.hpp"
+#include "diar/onnx_embedder.hpp"
 #include <cmath>
 #include <algorithm>
 #include <complex>
@@ -942,7 +943,43 @@ ContinuousFrameAnalyzer::Frame ContinuousFrameAnalyzer::extract_frame_at_ms(int6
     
     // Extract embedding from this window
     const int16_t* window_audio = m_audio_buffer.data() + offset_samples;
-    frame.embedding = compute_speaker_embedding(window_audio, window_samples, m_sample_rate);
+    
+    // Choose embedding method based on configuration
+    if (m_config.embedding_mode == EmbeddingMode::NeuralONNX) {
+        // Lazy-initialize ONNX embedder
+        if (!m_onnx_embedder) {
+            try {
+                OnnxSpeakerEmbedder::Config onnx_cfg;
+                onnx_cfg.model_path = m_config.onnx_model_path;
+                onnx_cfg.sample_rate = m_sample_rate;
+                onnx_cfg.target_length_samples = window_samples;  // Use same window as audio
+                onnx_cfg.normalize_output = true;
+                onnx_cfg.verbose = m_config.verbose;
+                m_onnx_embedder = std::make_unique<OnnxSpeakerEmbedder>(onnx_cfg);
+                
+                if (m_config.verbose) {
+                    fprintf(stderr, "[Frame] Initialized ONNX embedder: dim=%d\n", 
+                            m_onnx_embedder->embedding_dim());
+                }
+            } catch (const std::exception& e) {
+                fprintf(stderr, "[Frame] ERROR: Failed to initialize ONNX embedder: %s\n", e.what());
+                fprintf(stderr, "[Frame] Falling back to hand-crafted features\n");
+                // Fall through to hand-crafted features
+                frame.embedding = compute_speaker_embedding_v2(window_audio, window_samples, m_sample_rate);
+                return frame;
+            }
+        }
+        
+        // Extract neural embedding
+        frame.embedding = m_onnx_embedder->compute_embedding(window_audio, window_samples);
+    } else {
+        // Use hand-crafted features (Phase 2b)
+        frame.embedding = compute_speaker_embedding_v2(window_audio, window_samples, m_sample_rate);
+    }
+    
+    if (m_config.verbose && frame.embedding.size() > 0) {
+        fprintf(stderr, "[Frame] t=%lld ms, emb_dim=%zu\n", center_ms, frame.embedding.size());
+    }
     
     return frame;
 }
