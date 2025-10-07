@@ -21,6 +21,13 @@ struct SpeakerSegment {
 // Returns a fixed-dim vector optimized for speaker identity (not content)
 std::vector<float> compute_speaker_embedding(const int16_t* pcm16, size_t samples, int sample_rate);
 
+// Enhanced v2: MFCC + Delta + Pitch + Formants + Spectral features (53-dim)
+// More discriminative for speaker recognition than simple mel features
+std::vector<float> compute_speaker_embedding_v2(const int16_t* pcm16, size_t samples, int sample_rate);
+
+// Legacy: Simple log-mel features (40-dim, less discriminative)
+std::vector<float> compute_logmel_embedding(const int16_t* pcm16, size_t samples, int sample_rate, int n_mels = 40);
+
 // Detect speaker segments in audio using sliding window VAD + diarization
 // Returns list of segments with speaker IDs and timestamps
 // min_segment_ms: minimum segment duration (default 300ms)

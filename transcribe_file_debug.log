@@ -394,3 +394,42 @@ argv: [0]=C:\PRJ\VAM\desktop-live-whisper-multiplatform\build\tests-only-release
 
 === run at Tue Oct  7 11:35:19 2025
 argv: [0]=C:\PRJ\VAM\desktop-live-whisper-multiplatform\build\tests-only-release\app_transcribe_file.exe [1]=test_data\Sean_Carroll_podcast.wav [2]=--limit-seconds [3]=20
+
+=== run at Tue Oct  7 11:49:21 2025
+argv: [0]=C:\PRJ\VAM\desktop-live-whisper-multiplatform\build\tests-only-release\app_transcribe_file.exe [1]=test_data/Sean_Carroll_podcast.wav [2]=--limit-seconds [3]=20 [4]=-v
+
+=== run at Tue Oct  7 11:49:48 2025
+argv: [0]=C:\PRJ\VAM\desktop-live-whisper-multiplatform\build\tests-only-release\app_transcribe_file.exe [1]=test_data/Sean_Carroll_podcast.wav [2]=--limit-seconds [3]=20 [4]=-v
+
+=== run at Tue Oct  7 11:52:14 2025
+argv: [0]=C:\PRJ\VAM\desktop-live-whisper-multiplatform\build\tests-only-release\app_transcribe_file.exe [1]=test_data/Sean_Carroll_podcast.wav [2]=--limit-seconds [3]=20 [4]=-v
+
+=== run at Tue Oct  7 11:52:44 2025
+argv: [0]=C:\PRJ\VAM\desktop-live-whisper-multiplatform\build\tests-only-release\app_transcribe_file.exe [1]=test_data/Sean_Carroll_podcast.wav [2]=--limit-seconds [3]=20 [4]=-v
+
+=== run at Tue Oct  7 11:53:51 2025
+argv: [0]=C:\PRJ\VAM\desktop-live-whisper-multiplatform\build\tests-only-release\app_transcribe_file.exe [1]=test_data/Sean_Carroll_podcast.wav [2]=--limit-seconds [3]=5 [4]=-v
+
+=== run at Tue Oct  7 11:54:21 2025
+argv: [0]=C:\PRJ\VAM\desktop-live-whisper-multiplatform\build\tests-only-release\app_transcribe_file.exe [1]=test_data/Sean_Carroll_podcast.wav [2]=--limit-seconds [3]=5 [4]=-v
+
+=== run at Tue Oct  7 11:54:49 2025
+argv: [0]=C:\PRJ\VAM\desktop-live-whisper-multiplatform\build\tests-only-release\app_transcribe_file.exe [1]=test_data/Sean_Carroll_podcast.wav [2]=--limit-seconds [3]=5 [4]=-v
+
+=== run at Tue Oct  7 11:55:57 2025
+argv: [0]=C:\PRJ\VAM\desktop-live-whisper-multiplatform\build\tests-only-release\app_transcribe_file.exe [1]=test_data/Sean_Carroll_podcast.wav [2]=--limit-seconds [3]=5 [4]=-v
+
+=== run at Tue Oct  7 12:07:44 2025
+argv: [0]=C:\PRJ\VAM\desktop-live-whisper-multiplatform\build\tests-only-release\app_transcribe_file.exe [1]=test_data/Sean_Carroll_podcast.wav [2]=--limit-seconds [3]=20 [4]=-v
+
+=== run at Tue Oct  7 12:08:46 2025
+argv: [0]=C:\PRJ\VAM\desktop-live-whisper-multiplatform\build\tests-only-release\app_transcribe_file.exe [1]=test_data/Sean_Carroll_podcast.wav [2]=--limit-seconds [3]=20
+
+=== run at Tue Oct  7 12:09:29 2025
+argv: [0]=C:\PRJ\VAM\desktop-live-whisper-multiplatform\build\tests-only-release\app_transcribe_file.exe [1]=test_data/Sean_Carroll_podcast.wav [2]=--limit-seconds [3]=20
+
+=== run at Tue Oct  7 12:09:55 2025
+argv: [0]=C:\PRJ\VAM\desktop-live-whisper-multiplatform\build\tests-only-release\app_transcribe_file.exe [1]=test_data/Sean_Carroll_podcast.wav [2]=--limit-seconds [3]=20
+
+=== run at Tue Oct  7 12:10:24 2025
+argv: [0]=C:\PRJ\VAM\desktop-live-whisper-multiplatform\build\tests-only-release\app_transcribe_file.exe [1]=test_data/Sean_Carroll_podcast.wav [2]=--limit-seconds [3]=20 [4]=-v

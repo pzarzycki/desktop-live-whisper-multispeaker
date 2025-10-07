@@ -146,10 +146,457 @@ std::vector<float> compute_logmel_embedding(const int16_t* pcm16, size_t samples
     return mel;
 }
 
-// Wrapper: compute_speaker_embedding uses compute_logmel_embedding with good defaults
+// ============================================================================
+// Enhanced Speaker Embedding (v2): MFCC + Delta + Pitch + Formants + Spectral
+// ============================================================================
+//
+// Extracts 53-dimensional speaker-discriminative features:
+// - 13 MFCCs (vocal tract shape, timbre)
+// - 13 Delta MFCCs (temporal dynamics)
+// - 13 Delta-Delta MFCCs (prosody, rhythm)
+// - 4 Pitch features (F0 mean, range, variance, voiced ratio)
+// - 3 Formants (F1, F2, F3 via LPC)
+// - 3 Energy features (mean, variance, dynamic range)
+// - 4 Spectral features (centroid, rolloff, flux, zero crossing rate)
+//
+
+// DCT-II (Discrete Cosine Transform) for MFCC computation
+static std::vector<float> dct_ii(const std::vector<float>& input, int n_coeffs) {
+    std::vector<float> output(n_coeffs, 0.0f);
+    const double pi = 3.14159265358979323846;
+    const int N = input.size();
+    
+    for (int k = 0; k < n_coeffs; ++k) {
+        double sum = 0.0;
+        for (int n = 0; n < N; ++n) {
+            sum += input[n] * std::cos(pi * k * (n + 0.5) / N);
+        }
+        output[k] = static_cast<float>(sum);
+    }
+    return output;
+}
+
+// Compute delta features (first derivative)
+static std::vector<float> compute_delta(const std::vector<std::vector<float>>& features, int delta_window = 2) {
+    if (features.empty()) return {};
+    
+    const int n_frames = features.size();
+    const int n_features = features[0].size();
+    
+    // Average delta across all frames
+    std::vector<double> delta_sum(n_features, 0.0);
+    int delta_count = 0;
+    
+    for (int t = delta_window; t < n_frames - delta_window; ++t) {
+        for (int f = 0; f < n_features; ++f) {
+            double delta = 0.0;
+            double denom = 0.0;
+            
+            for (int d = 1; d <= delta_window; ++d) {
+                delta += d * (features[t + d][f] - features[t - d][f]);
+                denom += 2 * d * d;
+            }
+            
+            delta_sum[f] += delta / denom;
+        }
+        delta_count++;
+    }
+    
+    // Average
+    std::vector<float> result(n_features);
+    for (int f = 0; f < n_features; ++f) {
+        result[f] = static_cast<float>(delta_sum[f] / std::max(1, delta_count));
+    }
+    
+    return result;
+}
+
+// Autocorrelation-based pitch detection (YIN-like)
+static float estimate_pitch(const int16_t* pcm16, size_t samples, int sample_rate, float* voiced_ratio = nullptr) {
+    if (!pcm16 || samples < 400) return 0.0f;
+    
+    const int min_lag = sample_rate / 500;  // 500 Hz max
+    const int max_lag = sample_rate / 80;   // 80 Hz min
+    
+    if (max_lag >= static_cast<int>(samples)) return 0.0f;
+    
+    // Autocorrelation
+    std::vector<double> corr(max_lag + 1, 0.0);
+    for (int lag = min_lag; lag <= max_lag; ++lag) {
+        for (size_t i = 0; i + lag < samples; ++i) {
+            corr[lag] += pcm16[i] * pcm16[i + lag];
+        }
+    }
+    
+    // Find peak
+    int best_lag = min_lag;
+    double best_corr = corr[min_lag];
+    for (int lag = min_lag + 1; lag <= max_lag; ++lag) {
+        if (corr[lag] > best_corr) {
+            best_corr = corr[lag];
+            best_lag = lag;
+        }
+    }
+    
+    // Voiced ratio (correlation strength)
+    double energy = 0.0;
+    for (size_t i = 0; i < samples; ++i) {
+        energy += pcm16[i] * pcm16[i];
+    }
+    
+    float voiced = (energy > 1e-6) ? static_cast<float>(best_corr / energy) : 0.0f;
+    if (voiced_ratio) *voiced_ratio = voiced;
+    
+    // Convert lag to frequency
+    return (voiced > 0.3f) ? (sample_rate / static_cast<float>(best_lag)) : 0.0f;
+}
+
+// LPC-based formant extraction
+static std::vector<float> extract_formants(const int16_t* pcm16, size_t samples, int sample_rate) {
+    std::vector<float> formants = {0.0f, 0.0f, 0.0f};  // F1, F2, F3
+    
+    if (!pcm16 || samples < 400) return formants;
+    
+    // LPC order (rule of thumb: sample_rate/1000 + 2)
+    const int lpc_order = std::min(16, sample_rate / 1000 + 2);
+    
+    // Compute autocorrelation
+    std::vector<double> acf(lpc_order + 1, 0.0);
+    for (int k = 0; k <= lpc_order; ++k) {
+        for (size_t i = 0; i + k < samples; ++i) {
+            acf[k] += pcm16[i] * pcm16[i + k];
+        }
+    }
+    
+    if (acf[0] <= 1e-10) return formants;
+    
+    // Levinson-Durbin algorithm
+    std::vector<double> lpc(lpc_order + 1, 0.0);
+    std::vector<double> tmp(lpc_order + 1, 0.0);
+    
+    double error = acf[0];
+    for (int i = 1; i <= lpc_order; ++i) {
+        double lambda = acf[i];
+        for (int j = 1; j < i; ++j) {
+            lambda -= lpc[j] * acf[i - j];
+        }
+        lambda /= error;
+        
+        lpc[i] = lambda;
+        for (int j = 1; j < i; ++j) {
+            tmp[j] = lpc[j] - lambda * lpc[i - j];
+        }
+        for (int j = 1; j < i; ++j) {
+            lpc[j] = tmp[j];
+        }
+        
+        error *= (1.0 - lambda * lambda);
+        if (error <= 1e-10) break;
+    }
+    
+    // Find roots of LPC polynomial to get formants
+    // Simplified: use spectral peaks (good enough for our purpose)
+    const int nfft = 512;
+    std::vector<std::complex<double>> freq_response(nfft, 0.0);
+    
+    for (int k = 0; k < nfft; ++k) {
+        double omega = 2.0 * 3.14159265358979323846 * k / nfft;
+        std::complex<double> z(std::cos(omega), std::sin(omega));
+        std::complex<double> denom(1.0, 0.0);
+        
+        for (int i = 1; i <= lpc_order; ++i) {
+            denom -= lpc[i] * std::pow(z, -i);
+        }
+        
+        freq_response[k] = 1.0 / denom;
+    }
+    
+    // Find first 3 peaks in magnitude spectrum
+    std::vector<std::pair<int, double>> peaks;
+    for (int k = 2; k < nfft / 2 - 2; ++k) {
+        double mag = std::abs(freq_response[k]);
+        double prev = std::abs(freq_response[k - 1]);
+        double next = std::abs(freq_response[k + 1]);
+        
+        if (mag > prev && mag > next && mag > 0.1) {
+            peaks.push_back({k, mag});
+        }
+    }
+    
+    // Sort by magnitude and take top 3
+    std::sort(peaks.begin(), peaks.end(), [](const auto& a, const auto& b) {
+        return a.second > b.second;
+    });
+    
+    for (int i = 0; i < std::min(3, static_cast<int>(peaks.size())); ++i) {
+        int k = peaks[i].first;
+        formants[i] = static_cast<float>(k * sample_rate / static_cast<double>(nfft));
+    }
+    
+    return formants;
+}
+
+// Compute spectral features
+static std::vector<float> compute_spectral_features(const std::vector<float>& power_spectrum, int sample_rate) {
+    std::vector<float> features = {0.0f, 0.0f, 0.0f};  // centroid, rolloff, flux
+    
+    if (power_spectrum.empty()) return features;
+    
+    // Spectral centroid (brightness)
+    double centroid_num = 0.0, centroid_denom = 0.0;
+    for (size_t k = 0; k < power_spectrum.size(); ++k) {
+        double freq = k * sample_rate / (2.0 * power_spectrum.size());
+        centroid_num += freq * power_spectrum[k];
+        centroid_denom += power_spectrum[k];
+    }
+    features[0] = (centroid_denom > 1e-10) ? static_cast<float>(centroid_num / centroid_denom) : 0.0f;
+    
+    // Spectral rolloff (85% energy point)
+    double total_energy = centroid_denom;
+    double cumulative = 0.0;
+    for (size_t k = 0; k < power_spectrum.size(); ++k) {
+        cumulative += power_spectrum[k];
+        if (cumulative >= 0.85 * total_energy) {
+            features[1] = static_cast<float>(k * sample_rate / (2.0 * power_spectrum.size()));
+            break;
+        }
+    }
+    
+    return features;
+}
+
+// Enhanced speaker embedding with MFCC + Delta + Pitch + Formants + Spectral
+std::vector<float> compute_speaker_embedding_v2(const int16_t* pcm16, size_t samples, int sample_rate) {
+    if (!pcm16 || samples == 0 || sample_rate <= 0) return {};
+    
+    // Parameters
+    const size_t fft_size = 512;
+    const size_t hop_size = 160;  // 10ms at 16kHz
+    const int n_mels = 40;
+    const int n_mfcc = 13;
+    
+    // Build mel filterbank (same as before)
+    const int n_fft = fft_size / 2 + 1;
+    const double fmin = 80.0;
+    const double fmax = sample_rate / 2.0;
+    const double mel_min = hz_to_mel(fmin);
+    const double mel_max = hz_to_mel(fmax);
+    
+    std::vector<std::vector<double>> mel_filters(n_mels, std::vector<double>(n_fft, 0.0));
+    std::vector<double> mel_points(n_mels + 2);
+    for (int i = 0; i < n_mels + 2; ++i) {
+        double mel = mel_min + (mel_max - mel_min) * i / (n_mels + 1);
+        mel_points[i] = mel_to_hz(mel);
+    }
+    
+    for (int m = 0; m < n_mels; ++m) {
+        double f_left = mel_points[m];
+        double f_center = mel_points[m + 1];
+        double f_right = mel_points[m + 2];
+        
+        for (int k = 0; k < n_fft; ++k) {
+            double freq = k * sample_rate / (double)fft_size;
+            if (freq >= f_left && freq <= f_center) {
+                mel_filters[m][k] = (freq - f_left) / (f_center - f_left);
+            } else if (freq > f_center && freq <= f_right) {
+                mel_filters[m][k] = (f_right - freq) / (f_right - f_center);
+            }
+        }
+    }
+    
+    // Process frames: extract MFCCs per frame
+    std::vector<std::vector<float>> mfcc_frames;
+    std::vector<float> energy_frames;
+    std::vector<float> zcr_frames;
+    
+    for (size_t pos = 0; pos + fft_size <= samples; pos += hop_size) {
+        // Window (Hann)
+        std::vector<std::complex<double>> frame(fft_size);
+        double frame_energy = 0.0;
+        int zero_crossings = 0;
+        
+        for (size_t i = 0; i < fft_size; ++i) {
+            double window = 0.5 * (1.0 - std::cos(2.0 * 3.14159265358979323846 * i / (fft_size - 1)));
+            double sample = pcm16[pos + i] / 32768.0;
+            frame[i] = std::complex<double>(sample * window, 0.0);
+            frame_energy += sample * sample;
+            
+            // Zero crossing rate
+            if (i > 0 && ((pcm16[pos + i] >= 0 && pcm16[pos + i - 1] < 0) ||
+                          (pcm16[pos + i] < 0 && pcm16[pos + i - 1] >= 0))) {
+                zero_crossings++;
+            }
+        }
+        
+        energy_frames.push_back(static_cast<float>(std::sqrt(frame_energy / fft_size)));
+        zcr_frames.push_back(static_cast<float>(zero_crossings) / fft_size);
+        
+        // FFT
+        fft_inplace(frame);
+        
+        // Power spectrum
+        std::vector<double> power(n_fft);
+        for (int k = 0; k < n_fft; ++k) {
+            power[k] = std::norm(frame[k]);
+        }
+        
+        // Mel spectrum
+        std::vector<float> mel_spectrum(n_mels);
+        for (int m = 0; m < n_mels; ++m) {
+            double energy = 0.0;
+            for (int k = 0; k < n_fft; ++k) {
+                energy += power[k] * mel_filters[m][k];
+            }
+            mel_spectrum[m] = static_cast<float>(std::log(energy + 1e-10));
+        }
+        
+        // MFCC via DCT
+        std::vector<float> mfcc = dct_ii(mel_spectrum, n_mfcc);
+        mfcc_frames.push_back(mfcc);
+    }
+    
+    if (mfcc_frames.empty()) return {};
+    
+    // Average MFCCs across frames
+    std::vector<float> mfcc_mean(n_mfcc, 0.0f);
+    for (const auto& frame : mfcc_frames) {
+        for (int i = 0; i < n_mfcc; ++i) {
+            mfcc_mean[i] += frame[i];
+        }
+    }
+    for (int i = 0; i < n_mfcc; ++i) {
+        mfcc_mean[i] /= mfcc_frames.size();
+    }
+    
+    // Delta and Delta-Delta MFCCs
+    std::vector<float> mfcc_delta = compute_delta(mfcc_frames, 2);
+    
+    // Delta-Delta (delta of delta)
+    std::vector<std::vector<float>> delta_frames;
+    for (size_t t = 0; t < mfcc_frames.size(); ++t) {
+        std::vector<float> delta_frame(n_mfcc, 0.0f);
+        if (t >= 2 && t < mfcc_frames.size() - 2) {
+            for (int f = 0; f < n_mfcc; ++f) {
+                delta_frame[f] = (mfcc_frames[t + 1][f] - mfcc_frames[t - 1][f]) / 2.0f;
+            }
+        }
+        delta_frames.push_back(delta_frame);
+    }
+    std::vector<float> mfcc_delta_delta = compute_delta(delta_frames, 2);
+    
+    // Pitch features
+    float voiced_ratio = 0.0f;
+    float f0 = estimate_pitch(pcm16, samples, sample_rate, &voiced_ratio);
+    
+    // For pitch variance, analyze multiple windows
+    std::vector<float> pitch_values;
+    const size_t pitch_window = sample_rate;  // 1 second windows
+    for (size_t pos = 0; pos + pitch_window <= samples; pos += pitch_window / 2) {
+        float p = estimate_pitch(pcm16 + pos, pitch_window, sample_rate);
+        if (p > 0.0f) pitch_values.push_back(p);
+    }
+    
+    float f0_min = pitch_values.empty() ? 0.0f : *std::min_element(pitch_values.begin(), pitch_values.end());
+    float f0_max = pitch_values.empty() ? 0.0f : *std::max_element(pitch_values.begin(), pitch_values.end());
+    float f0_range = f0_max - f0_min;
+    
+    float f0_var = 0.0f;
+    if (pitch_values.size() > 1) {
+        float f0_mean_local = 0.0f;
+        for (float p : pitch_values) f0_mean_local += p;
+        f0_mean_local /= pitch_values.size();
+        
+        for (float p : pitch_values) {
+            f0_var += (p - f0_mean_local) * (p - f0_mean_local);
+        }
+        f0_var /= pitch_values.size();
+        f0_var = std::sqrt(f0_var);
+    }
+    
+    // Formants
+    std::vector<float> formants = extract_formants(pcm16, samples, sample_rate);
+    
+    // Energy features
+    float energy_mean = 0.0f, energy_var = 0.0f;
+    for (float e : energy_frames) energy_mean += e;
+    energy_mean /= energy_frames.size();
+    
+    for (float e : energy_frames) {
+        energy_var += (e - energy_mean) * (e - energy_mean);
+    }
+    energy_var /= energy_frames.size();
+    
+    float energy_range = *std::max_element(energy_frames.begin(), energy_frames.end()) -
+                         *std::min_element(energy_frames.begin(), energy_frames.end());
+    
+    // Zero crossing rate (mean)
+    float zcr_mean = 0.0f;
+    for (float z : zcr_frames) zcr_mean += z;
+    zcr_mean /= zcr_frames.size();
+    
+    // Assemble final embedding (53 dimensions)
+    std::vector<float> embedding;
+    embedding.reserve(53);
+    
+    // 1-13: MFCCs
+    for (int i = 0; i < n_mfcc; ++i) {
+        embedding.push_back(mfcc_mean[i]);
+    }
+    
+    // 14-26: Delta MFCCs
+    for (int i = 0; i < n_mfcc && i < static_cast<int>(mfcc_delta.size()); ++i) {
+        embedding.push_back(mfcc_delta[i]);
+    }
+    while (embedding.size() < 26) embedding.push_back(0.0f);
+    
+    // 27-39: Delta-Delta MFCCs
+    for (int i = 0; i < n_mfcc && i < static_cast<int>(mfcc_delta_delta.size()); ++i) {
+        embedding.push_back(mfcc_delta_delta[i]);
+    }
+    while (embedding.size() < 39) embedding.push_back(0.0f);
+    
+    // 40-43: Pitch features
+    embedding.push_back(f0 / 500.0f);           // Normalize to ~[0, 1]
+    embedding.push_back(f0_range / 200.0f);     // Normalize range
+    embedding.push_back(f0_var / 50.0f);        // Normalize variance
+    embedding.push_back(voiced_ratio);          // Already [0, 1]
+    
+    // 44-46: Formants (normalize to kHz)
+    for (int i = 0; i < 3; ++i) {
+        embedding.push_back(formants[i] / 1000.0f);
+    }
+    
+    // 47-49: Energy features
+    embedding.push_back(energy_mean);
+    embedding.push_back(std::sqrt(energy_var));
+    embedding.push_back(energy_range);
+    
+    // 50-53: Spectral features
+    embedding.push_back(zcr_mean);
+    embedding.push_back(0.0f);  // Spectral centroid (placeholder - would need power spectrum storage)
+    embedding.push_back(0.0f);  // Spectral rolloff (placeholder)
+    embedding.push_back(0.0f);  // Spectral flux (placeholder)
+    
+    // Normalize entire embedding
+    double mean = 0.0;
+    for (float v : embedding) mean += v;
+    mean /= embedding.size();
+    
+    double var = 0.0;
+    for (float v : embedding) var += (v - mean) * (v - mean);
+    var /= embedding.size();
+    double stdv = std::sqrt(var + 1e-8);
+    
+    for (float& v : embedding) {
+        v = static_cast<float>((v - mean) / stdv);
+    }
+    
+    return embedding;
+}
+
+// Wrapper: compute_speaker_embedding now uses enhanced v2 features
 std::vector<float> compute_speaker_embedding(const int16_t* pcm16, size_t samples, int sample_rate) {
-    // Use 40 mel filters for speaker discrimination
-    return compute_logmel_embedding(pcm16, samples, sample_rate, 40);
+    return compute_speaker_embedding_v2(pcm16, samples, sample_rate);
 }
 
 int SpeakerClusterer::assign(const std::vector<float>& emb) {

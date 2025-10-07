@@ -375,11 +375,20 @@ int main(int argc, char** argv) {
                 
                 // Process window if ready (ORIGINAL LOGIC - DO NOT MODIFY)
                 if (acc16k.size() >= window_samples) {
+                    if (verbose) {
+                        fprintf(stderr, "\n[DEBUG] Processing window: acc16k.size()=%zu, window_samples=%zu\n",
+                                acc16k.size(), window_samples);
+                    }
+                    
                     // Gate mostly-silent windows
                     double sum2 = 0.0;
                     for (auto s : acc16k) { double v = s / 32768.0; sum2 += v*v; }
                     double rms = std::sqrt(sum2 / std::max<size_t>(1, acc16k.size()));
                     double dbfs = (rms > 0) ? 20.0 * std::log10(rms) : -120.0;
+                    
+                    if (verbose) {
+                        fprintf(stderr, "[DEBUG] dbfs=%.2f (threshold=-55.0)\n", dbfs);
+                    }
                     
                     std::string txt;
                     if (dbfs > -55.0) {
@@ -401,6 +410,11 @@ int main(int argc, char** argv) {
                         
                         // Remove overlap-duplicated prefix words
                         std::string merged = dedup.merge(segTxt);
+                        
+                        if (verbose) {
+                            fprintf(stderr, "[DEBUG] Whisper returned: '%s', merged: '%s'\n", 
+                                    segTxt.c_str(), merged.c_str());
+                        }
                         
                         // Store segment with timing for frame-based speaker assignment
                         if (!merged.empty()) {
@@ -455,6 +469,8 @@ int main(int argc, char** argv) {
             
             // Phase 2b: Cluster frames and reassign speakers
             fprintf(stderr, "\n\n[Phase2] Clustering %zu frames...\n", frame_analyzer.frame_count());
+            fprintf(stderr, "[DEBUG] Before clustering: segments.size()=%zu\n", segments.size());
+            
             if (frame_analyzer.frame_count() > 0) {
                 frame_analyzer.cluster_frames(2, 0.50f);  // max_speakers=2, threshold=0.50
                 

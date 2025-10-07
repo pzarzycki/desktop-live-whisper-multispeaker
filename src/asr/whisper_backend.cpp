@@ -179,6 +179,11 @@ std::string WhisperBackend::transcribe_chunk(const int16_t* data, size_t samples
 		}
 		if (txt) {
 			std::string s(txt);
+			
+			if (is_verbose()) {
+				std::cerr << "[whisper_backend DEBUG] Raw segment[" << i << "]: '" << s << "'\n";
+			}
+			
 			// Filter common non-speech tokens
 			auto trim = [](std::string& x){
 				size_t a = x.find_first_not_of(" \t\r\n");
@@ -187,13 +192,57 @@ std::string WhisperBackend::transcribe_chunk(const int16_t* data, size_t samples
 				x = x.substr(a, b - a + 1);
 			};
 			trim(s);
+			
+			// Remove tinydiarize tokens: [_BEG_] at start, [_TT_XX] at end
+			// These are added by Whisper when using tinydiarize models
+			auto remove_prefix = [](std::string& x, const std::string& prefix) {
+				if (x.size() >= prefix.size() && x.substr(0, prefix.size()) == prefix) {
+					x = x.substr(prefix.size());
+				}
+			};
+			
+			remove_prefix(s, "[_BEG_]");
+			
+			// Remove [_TT_XX] pattern at end
+			size_t tt_pos = s.rfind("[_TT_");
+			if (tt_pos != std::string::npos) {
+				// Check if followed by digits and ]
+				bool valid = true;
+				size_t close_pos = s.find(']', tt_pos);
+				if (close_pos != std::string::npos) {
+					for (size_t i = tt_pos + 5; i < close_pos; ++i) {
+						if (!std::isdigit(s[i])) {
+							valid = false;
+							break;
+						}
+					}
+					if (valid) {
+						s = s.substr(0, tt_pos);
+					}
+				}
+			}
+			
+			trim(s);
+			
+			if (is_verbose() && !s.empty()) {
+				std::cerr << "[whisper_backend DEBUG] After cleaning: '" << s << "'\n";
+			}
+			
 			if (s == "[BLANK_AUDIO]" || s == "[ Silence ]" || s == "[silence]" || s == "[ Silence]" ) {
 				continue;
 			}
 			// Skip strings that are just a single bracketed token
 			if (s.size() > 2 && s.front() == '[' && s.back() == ']') {
+				if (is_verbose()) {
+					std::cerr << "[whisper_backend DEBUG] Skipping bracketed token: '" << s << "'\n";
+				}
 				continue;
 			}
+			
+			if (is_verbose() && !s.empty()) {
+				std::cerr << "[whisper_backend DEBUG] Adding to output: '" << s << "'\n";
+			}
+			
 			out += s;
 		}
 	}
