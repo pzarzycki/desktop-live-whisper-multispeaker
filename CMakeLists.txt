@@ -7,7 +7,6 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # Default to console-only build; UI can be enabled explicitly later
 option(BUILD_APP "Build the full Qt application and libraries" OFF)
-option(USE_THIRD_PARTY_WHISPER "Link vendored third_party/whisper.cpp" OFF)
 
 # Disable tests by default; enable when you want them
 set(BUILD_TESTING OFF CACHE BOOL "Enable CTest and test targets")
@@ -73,21 +72,61 @@ if(NOT BUILD_APP)
         target_link_libraries(asr_whisper PUBLIC whisper-cpp::whisper-cpp)
         target_compile_definitions(asr_whisper PUBLIC WHISPER_BACKEND_AVAILABLE=1)
         message(STATUS "Using whisper-cpp from vcpkg")
-    elseif (USE_THIRD_PARTY_WHISPER AND EXISTS "${CMAKE_SOURCE_DIR}/third_party/whisper.cpp/CMakeLists.txt")
+    elseif (EXISTS "${CMAKE_SOURCE_DIR}/third_party/whisper.cpp/CMakeLists.txt")
         # Build third_party whisper and ggml as static to avoid runtime DLL issues
         set(BUILD_SHARED_LIBS OFF CACHE BOOL "Build static libs" FORCE)
+        
+        # Enable OpenBLAS if available locally
+        if (EXISTS "${CMAKE_SOURCE_DIR}/third_party/openblas/bin/libopenblas.dll")
+            set(GGML_BLAS ON CACHE BOOL "Enable BLAS" FORCE)
+            set(BLA_VENDOR "OpenBLAS" CACHE STRING "BLAS vendor" FORCE)
+            set(GGML_BLAS_VENDOR "OpenBLAS" CACHE STRING "GGML BLAS vendor" FORCE)
+            # Use import library for DLL (.lib for MSVC, or .dll.a for MinGW)
+            if (EXISTS "${CMAKE_SOURCE_DIR}/third_party/openblas/libopenblas.lib")
+                set(BLAS_LIBRARIES "${CMAKE_SOURCE_DIR}/third_party/openblas/libopenblas.lib" CACHE FILEPATH "BLAS library" FORCE)
+            else()
+                set(BLAS_LIBRARIES "${CMAKE_SOURCE_DIR}/third_party/openblas/lib/libopenblas.dll.a" CACHE FILEPATH "BLAS library" FORCE)
+            endif()
+            set(BLAS_INCLUDE_DIRS "${CMAKE_SOURCE_DIR}/third_party/openblas/include" CACHE PATH "BLAS include dir" FORCE)
+            message(STATUS "Enabling BLAS with local OpenBLAS DLL at ${CMAKE_SOURCE_DIR}/third_party/openblas")
+        endif()
+        
         add_subdirectory(third_party/whisper.cpp EXCLUDE_FROM_ALL)
         target_link_libraries(asr_whisper PUBLIC whisper)
         target_compile_definitions(asr_whisper PUBLIC WHISPER_BACKEND_AVAILABLE=1)
         target_include_directories(asr_whisper PUBLIC third_party/whisper.cpp)
         message(STATUS "Using third_party/whisper.cpp")
     else()
-        message(STATUS "Whisper backend not available (no vcpkg whisper-cpp and no third_party/whisper.cpp). Building no-op backend.")
+        message(FATAL_ERROR "Whisper backend required but not found. Either install whisper-cpp via vcpkg or add the vendored submodule: git submodule add https://github.com/ggml-org/whisper.cpp third_party/whisper.cpp && git submodule update --init --recursive")
     endif()
 
-    add_executable(app_transcribe_file src/console/transcribe_file.cpp)
+    # Minimal WASAPI audio library for mic input and output (no Qt dependency)
+    add_library(audio_windows STATIC
+        src/audio/windows_wasapi.cpp
+        src/audio/windows_wasapi_out.cpp
+    )
+    target_include_directories(audio_windows PUBLIC src)
+    if (WIN32 AND MSVC)
+        target_link_libraries(audio_windows PRIVATE ole32 uuid)
+    endif()
+
+    # Ensure output TU is compiled as C++
+    set_source_files_properties(src/audio/windows_wasapi_out.cpp PROPERTIES LANGUAGE CXX)
+
+    add_library(diarization STATIC
+        src/diar/speaker_cluster.cpp
+    )
+    target_include_directories(diarization PUBLIC src)
+
+    add_executable(app_transcribe_file
+        src/console/transcribe_file.cpp
+        src/audio/file_capture.cpp
+    )
+    # Safeguard: ensure this TU is compiled as C++
+    set_source_files_properties(src/console/transcribe_file.cpp PROPERTIES LANGUAGE CXX)
+    target_compile_features(app_transcribe_file PRIVATE cxx_std_20)
     target_include_directories(app_transcribe_file PRIVATE src)
-    target_link_libraries(app_transcribe_file PRIVATE asr_whisper)
+    target_link_libraries(app_transcribe_file PRIVATE asr_whisper audio_windows diarization)
 endif()
 
 

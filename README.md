@@ -80,3 +80,12 @@ If you don't have `vcpkg` yet, clone it into the repo root:
 
 4. Run with a specific device ID:
 
+    - List devices (if a device lister is present):
+       - app_list_devices.exe
+    - Example run (mic mode, 10s window):
+       - app_transcribe_file.exe --device "{0.0.1.00000000}.{8d279ef3-e64f-477d-9aab-c253a44360ea}" --limit-seconds 10 --model third_party/whisper.cpp/models/ggml-small.en.bin
+
+    Preferred test microphone (saved in test_data/preferred_mic.txt):
+    - 2: Desktop Microphone (Microsoft® LifeCam HD-3000)
+    - ID: {0.0.1.00000000}.{8d279ef3-e64f-477d-9aab-c253a44360ea}
+

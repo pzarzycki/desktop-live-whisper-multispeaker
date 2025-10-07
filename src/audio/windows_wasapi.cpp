@@ -6,6 +6,9 @@
 #include <windows.h>
 #include <mmdeviceapi.h>
 #include <audioclient.h>
+#include <mmreg.h>
+#include <ks.h>
+#include <ksmedia.h>
 #include <functiondiscoverykeys_devpkey.h>
 #include <vector>
 #include <atomic>
@@ -45,15 +48,59 @@ bool WindowsWasapiCapture::start() {
 	hr = g_ws.device->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr, (void**)&g_ws.client);
 	if (FAILED(hr)) return false;
 
-	hr = g_ws.client->GetMixFormat(&g_ws.mixFormat);
-	if (FAILED(hr) || !g_ws.mixFormat) return false;
+	WAVEFORMATEX* mix = nullptr;
+	hr = g_ws.client->GetMixFormat(&mix);
+	if (FAILED(hr) || !mix) return false;
+
+	// Try to use 16 kHz mono float in shared mode; fallback to closest or mix format
+	WAVEFORMATEXTENSIBLE desired{};
+	desired.Format.wFormatTag = WAVE_FORMAT_EXTENSIBLE;
+	desired.Format.nChannels = 1;
+	desired.Format.nSamplesPerSec = 16000;
+	desired.Format.wBitsPerSample = 32;
+	desired.Format.nBlockAlign = (desired.Format.nChannels * desired.Format.wBitsPerSample) / 8; // 4
+	desired.Format.nAvgBytesPerSec = desired.Format.nSamplesPerSec * desired.Format.nBlockAlign; // 64k
+	desired.Format.cbSize = sizeof(WAVEFORMATEXTENSIBLE) - sizeof(WAVEFORMATEX);
+	desired.Samples.wValidBitsPerSample = 32;
+	desired.dwChannelMask = SPEAKER_FRONT_CENTER;
+	desired.SubFormat = KSDATAFORMAT_SUBTYPE_IEEE_FLOAT;
+
+	WAVEFORMATEX* closest = nullptr;
+	hr = g_ws.client->IsFormatSupported(AUDCLNT_SHAREMODE_SHARED, &desired.Format, &closest);
+	const WAVEFORMATEX* chosen = nullptr;
+	if (hr == S_OK) {
+		chosen = &desired.Format;
+	} else if (hr == S_FALSE && closest) {
+		chosen = closest;
+	} else {
+		chosen = mix;
+	}
 
 	// Shared mode, 20 ms buffer
 	REFERENCE_TIME hnsBufferDuration = 20 * 10000; // 20 ms
 	hr = g_ws.client->Initialize(AUDCLNT_SHAREMODE_SHARED,
-								 AUDCLNT_STREAMFLAGS_LOOPBACK & 0, // no loopback for capture; ensure 0
-								 hnsBufferDuration, 0, g_ws.mixFormat, nullptr);
-	if (FAILED(hr)) return false;
+								 0,
+								 hnsBufferDuration, 0, chosen, nullptr);
+	if (FAILED(hr)) {
+		if (closest) CoTaskMemFree(closest);
+		if (mix) CoTaskMemFree(mix);
+		return false;
+	}
+	// Store a copy of the chosen format in mixFormat for later queries
+	if (closest) {
+		g_ws.mixFormat = closest; // take ownership
+		CoTaskMemFree(mix);
+	} else if (chosen == &desired.Format) {
+		// Allocate and copy desired into CoTaskMem to unify freeing path
+		size_t sz = sizeof(WAVEFORMATEXTENSIBLE);
+		WAVEFORMATEXTENSIBLE* copy = (WAVEFORMATEXTENSIBLE*)CoTaskMemAlloc(sz);
+		if (!copy) { CoTaskMemFree(mix); return false; }
+		*copy = desired;
+		g_ws.mixFormat = &copy->Format;
+		CoTaskMemFree(mix);
+	} else {
+		g_ws.mixFormat = mix; // using device mix format
+	}
 
 	hr = g_ws.client->GetService(__uuidof(IAudioCaptureClient), (void**)&g_ws.capture);
 	if (FAILED(hr)) return false;
@@ -81,66 +128,88 @@ std::vector<int16_t> WindowsWasapiCapture::read_chunk() {
 	std::vector<int16_t> out;
 	if (!g_ws.running.load() || !g_ws.capture || !g_ws.mixFormat) return out;
 
-	UINT32 packetFrames = 0;
-	HRESULT hr = g_ws.capture->GetNextPacketSize(&packetFrames);
-	if (FAILED(hr) || packetFrames == 0) return out;
-
-	BYTE* data = nullptr;
-	UINT32 numFrames = 0;
-	DWORD flags = 0;
-	hr = g_ws.capture->GetBuffer(&data, &numFrames, &flags, nullptr, nullptr);
-	if (FAILED(hr) || !data || numFrames == 0) return out;
-
-	// Convert to int16 mono
 	const WAVEFORMATEX* wfx = g_ws.mixFormat;
 	const WORD ch = wfx->nChannels;
 	const WORD bps = wfx->wBitsPerSample; // bits per sample
-	const WORD bpf = (bps / 8) * ch;      // bytes per frame
-	const size_t frames = numFrames;
-	out.resize(frames);
-
-	if (wfx->wFormatTag == WAVE_FORMAT_IEEE_FLOAT || (wfx->wFormatTag == WAVE_FORMAT_EXTENSIBLE && bps == 32)) {
-		// Assume float32 planar? Usually interleaved float.
-		const float* f = reinterpret_cast<const float*>(data);
-		for (size_t i = 0; i < frames; ++i) {
-			float sum = 0.0f;
-			for (WORD c = 0; c < ch; ++c) sum += f[i * ch + c];
-			float mono = sum / (ch ? ch : 1);
-			int v = static_cast<int>(mono * 32767.0f);
-			if (v > 32767) v = 32767; else if (v < -32768) v = -32768;
-			out[i] = static_cast<int16_t>(v);
-		}
-	} else if (bps == 16) {
-		const int16_t* s = reinterpret_cast<const int16_t*>(data);
-		for (size_t i = 0; i < frames; ++i) {
-			int sum = 0;
-			for (WORD c = 0; c < ch; ++c) sum += s[i * ch + c];
-			out[i] = static_cast<int16_t>(sum / (ch ? ch : 1));
-		}
-	} else if (bps == 24 || bps == 32) {
-		const uint8_t* p = reinterpret_cast<const uint8_t*>(data);
-		for (size_t i = 0; i < frames; ++i) {
-			int acc = 0;
-			for (WORD c = 0; c < ch; ++c) {
-				const uint8_t* s = p + i * bpf + c * (bps / 8);
-				int32_t v = 0;
-				if (bps == 24) {
-					int32_t t = (s[0] | (s[1] << 8) | (s[2] << 16));
-					if (t & 0x800000) t |= ~0xFFFFFF; // sign extend 24-bit
-					v = t;
-				} else {
-					v = *reinterpret_cast<const int32_t*>(s);
-				}
-				acc += (bps == 24) ? (v >> 8) : (v >> 16);
-			}
-			out[i] = static_cast<int16_t>(acc / (ch ? ch : 1));
-		}
-	} else {
-		// Unsupported format; return empty
-		out.clear();
+	const WORD bpf = wfx->nBlockAlign;    // bytes per frame
+	bool isFloat = (wfx->wFormatTag == WAVE_FORMAT_IEEE_FLOAT);
+	bool isPCM = (wfx->wFormatTag == WAVE_FORMAT_PCM);
+	if (wfx->wFormatTag == WAVE_FORMAT_EXTENSIBLE) {
+		const WAVEFORMATEXTENSIBLE* wfex = reinterpret_cast<const WAVEFORMATEXTENSIBLE*>(wfx);
+		if (IsEqualGUID(wfex->SubFormat, KSDATAFORMAT_SUBTYPE_IEEE_FLOAT)) isFloat = true;
+		else if (IsEqualGUID(wfex->SubFormat, KSDATAFORMAT_SUBTYPE_PCM)) isPCM = true;
 	}
 
-	g_ws.capture->ReleaseBuffer(numFrames);
+	for (;;) {
+		UINT32 packetFrames = 0;
+		HRESULT hr = g_ws.capture->GetNextPacketSize(&packetFrames);
+		if (FAILED(hr) || packetFrames == 0) break;
+
+		BYTE* data = nullptr;
+		UINT32 numFrames = 0;
+		DWORD flags = 0;
+		hr = g_ws.capture->GetBuffer(&data, &numFrames, &flags, nullptr, nullptr);
+		if (FAILED(hr) || numFrames == 0) {
+			if (SUCCEEDED(hr)) g_ws.capture->ReleaseBuffer(numFrames);
+			break;
+		}
+
+		size_t old = out.size();
+		out.resize(old + numFrames);
+
+		if (flags & AUDCLNT_BUFFERFLAGS_SILENT) {
+			std::fill(out.begin() + old, out.end(), 0);
+			g_ws.capture->ReleaseBuffer(numFrames);
+			continue;
+		}
+
+		if (isFloat && bps == 32) {
+			const float* f = reinterpret_cast<const float*>(data);
+			for (size_t i = 0; i < numFrames; ++i) {
+				float sum = 0.0f;
+				for (WORD c = 0; c < ch; ++c) sum += f[i * ch + c];
+				float mono = sum / (ch ? ch : 1);
+				if (mono > 1.0f) mono = 1.0f; else if (mono < -1.0f) mono = -1.0f;
+				int v = static_cast<int>(mono * 32767.0f);
+				if (v > 32767) v = 32767; else if (v < -32768) v = -32768;
+				out[old + i] = static_cast<int16_t>(v);
+			}
+		} else if (isPCM) {
+			if (bps == 16) {
+				const int16_t* s = reinterpret_cast<const int16_t*>(data);
+				for (size_t i = 0; i < numFrames; ++i) {
+					int sum = 0;
+					for (WORD c = 0; c < ch; ++c) sum += s[i * ch + c];
+					out[old + i] = static_cast<int16_t>(sum / (ch ? ch : 1));
+				}
+			} else if (bps == 24 || bps == 32) {
+				const uint8_t* p = reinterpret_cast<const uint8_t*>(data);
+				for (size_t i = 0; i < numFrames; ++i) {
+					int acc = 0;
+					for (WORD c = 0; c < ch; ++c) {
+						const uint8_t* s = p + i * bpf + c * (bps / 8);
+						int32_t v = 0;
+						if (bps == 24) {
+							int32_t t = (s[0] | (s[1] << 8) | (s[2] << 16));
+							if (t & 0x800000) t |= ~0xFFFFFF; // sign extend 24-bit
+							v = t >> 8; // to ~16-bit
+						} else {
+							v = *reinterpret_cast<const int32_t*>(s) >> 16;
+						}
+						acc += v;
+					}
+					out[old + i] = static_cast<int16_t>(acc / (ch ? ch : 1));
+				}
+			} else {
+				std::fill(out.begin() + old, out.end(), 0);
+			}
+		} else {
+			std::fill(out.begin() + old, out.end(), 0);
+		}
+
+		g_ws.capture->ReleaseBuffer(numFrames);
+	}
+
 	return out;
 }
 
@@ -210,12 +279,53 @@ bool WindowsWasapiCapture::start_with_device(const std::string& device_id_utf8) 
 	hr = g_ws.device->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr, (void**)&g_ws.client);
 	if (FAILED(hr)) return false;
 
-	hr = g_ws.client->GetMixFormat(&g_ws.mixFormat);
-	if (FAILED(hr) || !g_ws.mixFormat) return false;
+	WAVEFORMATEX* mix = nullptr;
+	hr = g_ws.client->GetMixFormat(&mix);
+	if (FAILED(hr) || !mix) return false;
+
+	WAVEFORMATEXTENSIBLE desired{};
+	desired.Format.wFormatTag = WAVE_FORMAT_EXTENSIBLE;
+	desired.Format.nChannels = 1;
+	desired.Format.nSamplesPerSec = 16000;
+	desired.Format.wBitsPerSample = 32;
+	desired.Format.nBlockAlign = (desired.Format.nChannels * desired.Format.wBitsPerSample) / 8;
+	desired.Format.nAvgBytesPerSec = desired.Format.nSamplesPerSec * desired.Format.nBlockAlign;
+	desired.Format.cbSize = sizeof(WAVEFORMATEXTENSIBLE) - sizeof(WAVEFORMATEX);
+	desired.Samples.wValidBitsPerSample = 32;
+	desired.dwChannelMask = SPEAKER_FRONT_CENTER;
+	desired.SubFormat = KSDATAFORMAT_SUBTYPE_IEEE_FLOAT;
+
+	WAVEFORMATEX* closest = nullptr;
+	hr = g_ws.client->IsFormatSupported(AUDCLNT_SHAREMODE_SHARED, &desired.Format, &closest);
+	const WAVEFORMATEX* chosen = nullptr;
+	if (hr == S_OK) {
+		chosen = &desired.Format;
+	} else if (hr == S_FALSE && closest) {
+		chosen = closest;
+	} else {
+		chosen = mix;
+	}
 
 	REFERENCE_TIME hnsBufferDuration = 20 * 10000; // 20 ms
-	hr = g_ws.client->Initialize(AUDCLNT_SHAREMODE_SHARED, 0, hnsBufferDuration, 0, g_ws.mixFormat, nullptr);
-	if (FAILED(hr)) return false;
+	hr = g_ws.client->Initialize(AUDCLNT_SHAREMODE_SHARED, 0, hnsBufferDuration, 0, chosen, nullptr);
+	if (FAILED(hr)) {
+		if (closest) CoTaskMemFree(closest);
+		if (mix) CoTaskMemFree(mix);
+		return false;
+	}
+	if (closest) {
+		g_ws.mixFormat = closest;
+		CoTaskMemFree(mix);
+	} else if (chosen == &desired.Format) {
+		size_t sz = sizeof(WAVEFORMATEXTENSIBLE);
+		WAVEFORMATEXTENSIBLE* copy = (WAVEFORMATEXTENSIBLE*)CoTaskMemAlloc(sz);
+		if (!copy) { CoTaskMemFree(mix); return false; }
+		*copy = desired;
+		g_ws.mixFormat = &copy->Format;
+		CoTaskMemFree(mix);
+	} else {
+		g_ws.mixFormat = mix;
+	}
 
 	hr = g_ws.client->GetService(__uuidof(IAudioCaptureClient), (void**)&g_ws.capture);
 	if (FAILED(hr)) return false;
@@ -229,6 +339,27 @@ bool WindowsWasapiCapture::start_with_device(const std::string& device_id_utf8) 
 int WindowsWasapiCapture::sample_rate() const {
 	if (!g_ws.mixFormat) return 0;
 	return static_cast<int>(g_ws.mixFormat->nSamplesPerSec);
+}
+
+int WindowsWasapiCapture::channels() const {
+	if (!g_ws.mixFormat) return 0;
+	return static_cast<int>(g_ws.mixFormat->nChannels);
+}
+
+int WindowsWasapiCapture::bits_per_sample() const {
+	if (!g_ws.mixFormat) return 0;
+	return static_cast<int>(g_ws.mixFormat->wBitsPerSample);
+}
+
+bool WindowsWasapiCapture::is_float() const {
+	if (!g_ws.mixFormat) return false;
+	const WAVEFORMATEX* wfx = g_ws.mixFormat;
+	if (wfx->wFormatTag == WAVE_FORMAT_IEEE_FLOAT) return true;
+	if (wfx->wFormatTag == WAVE_FORMAT_EXTENSIBLE) {
+		const WAVEFORMATEXTENSIBLE* wfex = reinterpret_cast<const WAVEFORMATEXTENSIBLE*>(wfx);
+		return IsEqualGUID(wfex->SubFormat, KSDATAFORMAT_SUBTYPE_IEEE_FLOAT) ? true : false;
+	}
+	return false;
 }
 
 } // namespace audio

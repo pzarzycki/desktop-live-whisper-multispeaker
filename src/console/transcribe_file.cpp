@@ -1,3 +1,4 @@
+// Unified streaming console: microphone or WAV-backed simulated microphone
 #include <iostream>
 #include <fstream>
 #include <vector>
@@ -8,81 +9,38 @@
 #include <chrono>
 #include <ctime>
 #include <cstdlib>
+#include <thread>
+#include <cmath>
+#include <iomanip>
+#include <deque>
+#include <cctype>
+#include <atomic>
+#include <mutex>
 #include "asr/whisper_backend.hpp"
+#include "audio/windows_wasapi.hpp"
+#include "audio/file_capture.hpp"
+#include "audio/windows_wasapi_out.hpp"
+#include "audio/audio_queue.hpp"
+#include "diar/speaker_cluster.hpp"
 
-#pragma pack(push, 1)
-struct WavHeader {
-    char riff[4];      // "RIFF"
-    uint32_t chunkSize;
-    char wave[4];      // "WAVE"
-    char fmt[4];       // "fmt "
-    uint32_t subchunk1Size; // 16 for PCM
-    uint16_t audioFormat;   // 1 for PCM, 3 for IEEE float
-    uint16_t numChannels;
-    uint32_t sampleRate;
-    uint32_t byteRate;
-    uint16_t blockAlign;
-    uint16_t bitsPerSample;
+// WAV parsing moved into audio::FileCapture
+
+// Thread-safe performance tracking
+struct PerfMetrics {
+    std::mutex mutex;
+    double resample_acc = 0.0;
+    double diar_acc = 0.0;
+    double whisper_acc = 0.0;
+    
+    void add_resample(double t) { std::lock_guard<std::mutex> lock(mutex); resample_acc += t; }
+    void add_diar(double t) { std::lock_guard<std::mutex> lock(mutex); diar_acc += t; }
+    void add_whisper(double t) { std::lock_guard<std::mutex> lock(mutex); whisper_acc += t; }
+    
+    void get(double& r, double& d, double& w) {
+        std::lock_guard<std::mutex> lock(mutex);
+        r = resample_acc; d = diar_acc; w = whisper_acc;
+    }
 };
-#pragma pack(pop)
-
-static bool read_wav_pcm(const std::string &path, int &sr, std::vector<int16_t> &mono) {
-    std::ifstream in(path, std::ios::binary);
-    if (!in) { std::cerr << "[wav] open failed: " << path << "\n"; return false; }
-    WavHeader hdr{};
-    in.read(reinterpret_cast<char*>(&hdr), sizeof(hdr));
-    if (!in) { std::cerr << "[wav] header read failed\n"; return false; }
-    std::cerr << "[wav] riff=" << std::string(hdr.riff,4) << ", wave=" << std::string(hdr.wave,4)
-              << ", fmt_tag_size=" << hdr.subchunk1Size << ", audioFormat=" << hdr.audioFormat
-              << ", channels=" << hdr.numChannels << ", sampleRate=" << hdr.sampleRate
-              << ", bitsPerSample=" << hdr.bitsPerSample << "\n";
-    if (std::string(hdr.riff, 4) != "RIFF" || std::string(hdr.wave, 4) != "WAVE") { std::cerr << "[wav] not RIFF/WAVE\n"; return false; }
-    // Skip any extra fmt bytes if present
-    if (hdr.subchunk1Size > 16) in.seekg(hdr.subchunk1Size - 16, std::ios::cur);
-    // Find "data" chunk
-    char tag[4];
-    uint32_t dataSize = 0;
-    while (in.read(tag, 4)) {
-        uint32_t size = 0;
-        in.read(reinterpret_cast<char*>(&size), 4);
-        if (std::string(tag, 4) == "data") { dataSize = size; break; }
-        in.seekg(size, std::ios::cur);
-    }
-    if (dataSize == 0) { std::cerr << "[wav] no data chunk\n"; return false; }
-    sr = static_cast<int>(hdr.sampleRate);
-    const int ch = hdr.numChannels;
-    const int bps = hdr.bitsPerSample;
-    const size_t frames = (dataSize * 8ull) / (bps * ch);
-    mono.resize(frames);
-    if (hdr.audioFormat == 1 && bps == 16) {
-        // PCM int16
-        std::vector<int16_t> buf(frames * ch);
-        in.read(reinterpret_cast<char*>(buf.data()), buf.size() * sizeof(int16_t));
-        if (!in) { std::cerr << "[wav] pcm16 read failed\n"; return false; }
-        for (size_t i = 0; i < frames; ++i) {
-            int sum = 0;
-            for (int c = 0; c < ch; ++c) sum += buf[i * ch + c];
-            mono[i] = static_cast<int16_t>(sum / (ch ? ch : 1));
-        }
-    } else if (hdr.audioFormat == 3 && bps == 32) {
-        // IEEE float32
-        std::vector<float> buf(frames * ch);
-        in.read(reinterpret_cast<char*>(buf.data()), buf.size() * sizeof(float));
-        if (!in) { std::cerr << "[wav] float32 read failed\n"; return false; }
-        for (size_t i = 0; i < frames; ++i) {
-            float sum = 0.0f;
-            for (int c = 0; c < ch; ++c) sum += buf[i * ch + c];
-            float m = sum / (ch ? ch : 1);
-            int v = static_cast<int>(m * 32767.0f);
-            v = std::clamp(v, -32768, 32767);
-            mono[i] = static_cast<int16_t>(v);
-        }
-    } else {
-        std::cerr << "[wav] unsupported format: audioFormat=" << hdr.audioFormat << ", bps=" << bps << "\n";
-        return false;
-    }
-    return true;
-}
 
 static std::vector<int16_t> resample_to_16k(const std::vector<int16_t>& in, int in_hz) {
     const int target = 16000;
@@ -103,6 +61,55 @@ static std::vector<int16_t> resample_to_16k(const std::vector<int16_t>& in, int 
     }
     return out;
 }
+
+// Simple tokenizer that splits into lowercase alphanumeric "words"
+static std::vector<std::string> tokenize_words(const std::string& s) {
+    std::vector<std::string> out;
+    std::string cur;
+    for (unsigned char uc : s) {
+        if (std::isalnum(uc)) {
+            cur.push_back(static_cast<char>(std::tolower(uc)));
+        } else {
+            if (!cur.empty()) { out.push_back(cur); cur.clear(); }
+        }
+    }
+    if (!cur.empty()) out.push_back(cur);
+    return out;
+}
+
+// Maintain a rolling history of last words to de-duplicate overlapped window text
+class Deduper {
+public:
+    // Return the input text with any prefix that overlaps the history removed
+    std::string merge(const std::string& text) {
+        auto words = tokenize_words(text);
+        if (words.empty()) return std::string();
+        size_t max_overlap = std::min<size_t>({ history.size(), words.size(), 12 });
+        size_t best = 0;
+        for (size_t k = max_overlap; k > 0; --k) {
+            bool match = true;
+            for (size_t i = 0; i < k; ++i) {
+                if (history[history.size() - k + i] != words[i]) { match = false; break; }
+            }
+            if (match) { best = k; break; }
+        }
+        // Reconstruct output as space-joined words from words[best:]
+        std::string out;
+        for (size_t i = best; i < words.size(); ++i) {
+            if (!out.empty()) out.push_back(' ');
+            out += words[i];
+        }
+        // Update history with all words from this segment (not just the non-overlapped)
+        for (const auto& w : words) {
+            history.push_back(w);
+            if (history.size() > max_history) history.pop_front();
+        }
+        return out;
+    }
+private:
+    std::deque<std::string> history;
+    static constexpr size_t max_history = 64;
+};
 
 int main(int argc, char** argv) {
     // Force sync and print an early init line
@@ -125,14 +132,41 @@ int main(int argc, char** argv) {
         // ignore file logging errors
     }
     bool verbose = false;
-    int limit_sec = 0; // 0 = no limit
-    std::string path;
+    bool print_levels = false;
+    int limit_sec = 0; // 0 = no limit; applies to both file and mic modes
+    int user_threads = 0; // 0 = auto
+    int max_text_ctx = 0; // 0 = default
+    bool speed_up = true;
+    std::string path; // optional WAV path; if empty, use microphone
+        std::string deviceId; // optional WASAPI device ID
     std::string modelArg; // can be bare name (small.en) or explicit path (.gguf/.bin)
+    std::string save_mic_wav; // if non-empty and using mic, save raw captured mono int16 at input SR
+    bool play_file = true;    // default: when using file as input, play to speakers in real-time
+    bool enable_diar = true;  // allow disabling diarization for perf isolation
+    bool enable_asr = true;   // allow disabling ASR to debug audio path
     for (int i = 1; i < argc; ++i) {
         std::string a = argv[i];
         if (a == "-v" || a == "--verbose") { verbose = true; continue; }
         if (a == "--limit-seconds" && i + 1 < argc) { limit_sec = std::atoi(argv[++i]); continue; }
-        if (a == "--model" && i + 1 < argc) { modelArg = argv[++i]; continue; }
+        if (a == "--print-levels") { print_levels = true; continue; }
+        if (a == "--device" && i + 1 < argc) { deviceId = argv[++i]; continue; }
+    if (a == "--model" && i + 1 < argc) { modelArg = argv[++i]; continue; }
+    if (a == "--threads" && i + 1 < argc) { user_threads = std::atoi(argv[++i]); continue; }
+    if (a == "--max-text-ctx" && i + 1 < argc) { max_text_ctx = std::atoi(argv[++i]); continue; }
+    if (a == "--no-speed-up") { speed_up = false; continue; }
+        if (a == "--save-mic-wav") {
+            // Optional path argument
+            if (i + 1 < argc) {
+                std::string maybe = argv[i+1];
+                if (!maybe.empty() && maybe.rfind("-", 0) != 0) { save_mic_wav = maybe; ++i; }
+            }
+            if (save_mic_wav.empty()) save_mic_wav = "output/test_mic.wav";
+            continue;
+        }
+        if (a == "--play-file") { play_file = true; continue; }
+        if (a == "--no-play-file") { play_file = false; continue; }
+        if (a == "--no-diar") { enable_diar = false; continue; }
+        if (a == "--no-asr") { enable_asr = false; continue; }
         if (path.empty()) path = a;
     }
     if (verbose) {
@@ -143,46 +177,350 @@ int main(int argc, char** argv) {
 #endif
     if (!modelArg.empty()) std::cerr << "Model arg: " << modelArg << "\n";
     }
-    if (path.empty()) {
-        std::cerr << "Usage: app_transcribe_file [-v] [--limit-seconds N] [--model <path-or-name>] <path-to-wav>\n";
-        return 1;
+    // Choose capture: WAV-backed simulation or real mic
+    audio::FileCapture fileCap;
+    audio::WindowsWasapiCapture micCap;
+    audio::WindowsWasapiOut speaker;
+    bool useFile = !path.empty();
+    int in_sr = 0;
+    if (useFile) {
+        if (!fileCap.start_from_wav(path)) {
+            std::cerr << "[input] failed to open WAV: " << path << "\n";
+            return 1;
+        }
+        in_sr = fileCap.sample_rate();
+        std::cerr << "[input] file: " << path
+                  << ", sr=" << in_sr
+                  << ", ch=" << fileCap.channels()
+                  << ", bps=" << fileCap.bits_per_sample()
+                  << ", dur~" << fileCap.duration_seconds() << "s\n";
+        // Optionally start speaker playback at input SR so we hear what Whisper sees (post-downmix but pre-resample)
+        if (play_file) {
+            if (speaker.start(in_sr, 2)) {
+                std::cerr << "[play] output enabled at " << in_sr << " Hz to default device\n";
+            } else {
+                std::cerr << "[play] failed to start output; continuing silent\n";
+                play_file = false;
+            }
+        }
+    } else {
+        bool micOk = false;
+        if (!deviceId.empty()) {
+            micOk = micCap.start_with_device(deviceId);
+        } else {
+            micOk = micCap.start();
+        }
+        if (!micOk) {
+            std::cerr << "[input] failed to start microphone\n";
+            return 1;
+        }
+        in_sr = micCap.sample_rate();
+        std::cerr << "[input] microphone: sr=" << in_sr << " Hz";
+        if (!deviceId.empty()) std::cerr << ", deviceId=" << deviceId;
+        std::cerr << ", ch=" << micCap.channels() << ", bps=" << micCap.bits_per_sample() << (micCap.is_float()? ", float":"") << "\n";
     }
-
-    int sr = 0;
-    std::vector<int16_t> mono;
-    if (!read_wav_pcm(path, sr, mono)) {
-        std::cerr << "Failed to read WAV: " << path << "\n";
-        return 1;
-    }
-
-    std::cerr << "[wav] decoded mono: sr=" << sr << ", samples=" << mono.size() << ", duration~" << (sr>0? (mono.size() / (double)sr):0.0) << "s\n";
-    // Optionally limit duration before resample
-    if (limit_sec > 0) {
-        size_t max_samples = static_cast<size_t>(std::max(1, limit_sec) * sr);
-        if (mono.size() > max_samples) mono.resize(max_samples);
-    }
-    auto pcm16k = resample_to_16k(mono, sr);
-    std::cerr << "[resample] to 16k: samples=" << pcm16k.size() << ", duration~" << (pcm16k.size() / 16000.0) << "s\n";
 
     asr::WhisperBackend whisper;
-    bool model_ok = false;
-    if (!modelArg.empty()) {
-        model_ok = whisper.load_model(modelArg);
-    } else {
-        model_ok = whisper.load_model("small.en") || whisper.load_model("small");
-    }
-    if (!model_ok) {
-        std::cerr << "[whisper] Model load failed. Ensure a valid .gguf or .bin exists and path is correct.\n";
-        return 1;
+    if (enable_asr) {
+        if (user_threads > 0) whisper.set_threads(user_threads);
+        whisper.set_speed_up(speed_up);
+        if (max_text_ctx > 0) whisper.set_max_text_ctx(max_text_ctx);
+        bool model_ok = false;
+        if (!modelArg.empty()) {
+            model_ok = whisper.load_model(modelArg);
+        } else {
+            // Default to quantized base.en-q5_1 for best balance of quality, speed, and size
+            model_ok = whisper.load_model("base.en-q5_1") || whisper.load_model("base.en") || whisper.load_model("tiny.en") || whisper.load_model("small.en");
+        }
+        if (!model_ok) {
+            std::cerr << "[whisper] Model load failed. Ensure a valid .gguf or .bin exists and path is correct.\n";
+            return 1;
+        }
     }
 
-    auto text = whisper.transcribe_chunk(pcm16k.data(), pcm16k.size());
-    if (text.empty()) {
-        std::cerr << "[whisper] Empty transcription output.\n";
-        std::cerr << "[done] exit=2\n";
-        return 2;
+    // Stream in ~20ms chunks, accumulate to ~2s windows for better accuracy, then transcribe
+    std::cout << "Transcribing... press Ctrl+C to stop" << std::endl;
+
+    // Optional: setup WAV writer for mic recording
+    struct WavWriter {
+        std::ofstream out;
+        uint32_t sampleRate = 0;
+        uint32_t dataBytes = 0;
+        bool open(const std::string& p, uint32_t sr) {
+            namespace fs = std::filesystem;
+            try {
+                fs::path fp = fs::u8path(p);
+                if (fp.has_parent_path()) fs::create_directories(fp.parent_path());
+            } catch (...) {}
+            out.open(p, std::ios::binary);
+            if (!out) return false;
+            sampleRate = sr;
+            // Write placeholder header
+            out.write("RIFF", 4);
+            uint32_t chunkSize = 36; out.write(reinterpret_cast<char*>(&chunkSize), 4);
+            out.write("WAVE", 4);
+            out.write("fmt ", 4);
+            uint32_t sub1 = 16; out.write(reinterpret_cast<char*>(&sub1), 4);
+            uint16_t audioFormat = 1; out.write(reinterpret_cast<char*>(&audioFormat), 2);
+            uint16_t numChannels = 1; out.write(reinterpret_cast<char*>(&numChannels), 2);
+            uint32_t sr32 = sampleRate; out.write(reinterpret_cast<char*>(&sr32), 4);
+            uint32_t byteRate = sampleRate * 2; out.write(reinterpret_cast<char*>(&byteRate), 4);
+            uint16_t blockAlign = 2; out.write(reinterpret_cast<char*>(&blockAlign), 2);
+            uint16_t bitsPerSample = 16; out.write(reinterpret_cast<char*>(&bitsPerSample), 2);
+            out.write("data", 4);
+            uint32_t dataSize = 0; out.write(reinterpret_cast<char*>(&dataSize), 4);
+            return true;
+        }
+        void write(const int16_t* data, size_t n) {
+            if (!out) return;
+            out.write(reinterpret_cast<const char*>(data), n * sizeof(int16_t));
+            dataBytes += static_cast<uint32_t>(n * sizeof(int16_t));
+        }
+        void close() {
+            if (!out) return;
+            // Fix sizes
+            try {
+                out.seekp(4, std::ios::beg);
+                uint32_t chunkSize = 36 + dataBytes; out.write(reinterpret_cast<char*>(&chunkSize), 4);
+                out.seekp(40, std::ios::beg);
+                uint32_t dataSize = dataBytes; out.write(reinterpret_cast<char*>(&dataSize), 4);
+            } catch (...) {}
+            out.close();
+        }
+    };
+
+    WavWriter wavOut;
+    const bool recordMic = (!useFile && !save_mic_wav.empty());
+    if (recordMic) {
+        if (!wavOut.open(save_mic_wav, static_cast<uint32_t>(in_sr))) {
+            std::cerr << "[save] failed to open WAV for writing: " << save_mic_wav << "\n";
+        } else {
+            std::cerr << "[save] recording mic to: " << save_mic_wav << "\n";
+        }
     }
-    std::cout << text << "\n";
+
+    // Thread-safe queue for audio chunks
+    // Large buffer (50 chunks ≈ 1 second) allows processing to catch up during slow periods
+    audio::AudioQueue audioQueue(50);
+    
+    // Shared state
+    std::atomic<bool> processing_done{false};
+    std::atomic<uint64_t> processed_in_samples{0};
+    PerfMetrics perf;
+    
+    // Processing thread: handles resampling, diarization, and ASR
+    std::thread processing_thread;
+    if (enable_asr) {
+        processing_thread = std::thread([&]() {
+            std::vector<int16_t> acc16k;
+            // Diarization: 2 speakers with hysteresis to avoid rapid switching
+            // Lower threshold (0.60) allows creating 2nd speaker, hysteresis prevents flickering
+            diar::SpeakerClusterer spk(2, 0.60f);
+            Deduper dedup;
+            const int target_hz = 16000;
+            const size_t window_samples = static_cast<size_t>(target_hz * 1.5);
+            const size_t overlap_samples = static_cast<size_t>(target_hz * 0.5);
+            
+            int current_speaker = -1;  // Track speaker across windows
+            
+            while (true) {
+                audio::AudioQueue::Chunk chunk;
+                if (!audioQueue.pop(chunk)) {
+                    break; // Queue stopped
+                }
+                
+                // Resample
+                auto t_res0 = std::chrono::steady_clock::now();
+                auto ds = resample_to_16k(chunk.samples, chunk.sample_rate);
+                auto t_res1 = std::chrono::steady_clock::now();
+                perf.add_resample(std::chrono::duration<double>(t_res1 - t_res0).count());
+                
+                acc16k.insert(acc16k.end(), ds.begin(), ds.end());
+                if (verbose) { std::cerr << "." << std::flush; }
+                
+                // Process window if ready
+                if (acc16k.size() >= window_samples) {
+                    // Gate mostly-silent windows
+                    double sum2 = 0.0;
+                    for (auto s : acc16k) { double v = s / 32768.0; sum2 += v*v; }
+                    double rms = std::sqrt(sum2 / std::max<size_t>(1, acc16k.size()));
+                    double dbfs = (rms > 0) ? 20.0 * std::log10(rms) : -120.0;
+                    
+                    std::string txt;
+                    if (dbfs > -55.0) {
+                        // Diarization with proper mel-spectrogram features
+                        int sid = -1;
+                        if (enable_diar) {
+                            auto t_d0 = std::chrono::steady_clock::now();
+                            // Use 40 mel bands for better speaker discrimination
+                            auto emb = diar::compute_logmel_embedding(acc16k.data(), acc16k.size(), target_hz, 40);
+                            sid = spk.assign(emb);
+                            auto t_d1 = std::chrono::steady_clock::now();
+                            perf.add_diar(std::chrono::duration<double>(t_d1 - t_d0).count());
+                        }
+                        
+                        // Whisper
+                        auto t_w0 = std::chrono::steady_clock::now();
+                        std::string segTxt = whisper.transcribe_chunk(acc16k.data(), acc16k.size());
+                        auto t_w1 = std::chrono::steady_clock::now();
+                        perf.add_whisper(std::chrono::duration<double>(t_w1 - t_w0).count());
+                        
+                        // Remove overlap-duplicated prefix words
+                        std::string merged = dedup.merge(segTxt);
+                        if (!merged.empty() && sid >= 0) {
+                            txt = std::string("[S") + std::to_string(sid) + "] " + merged;
+                        } else if (!merged.empty()) {
+                            txt = merged;
+                        }
+                    }
+                    
+                    if (!txt.empty()) {
+                        if (verbose) std::cerr << "\n";
+                        std::cout << txt << "\n" << std::flush;
+                    }
+                    
+                    // Keep overlap
+                    if (acc16k.size() > overlap_samples) {
+                        std::vector<int16_t> tail(acc16k.end() - overlap_samples, acc16k.end());
+                        acc16k.swap(tail);
+                    } else {
+                        acc16k.clear();
+                    }
+                }
+            }
+            
+            // Final flush if we have a full window
+            if (acc16k.size() >= window_samples) {
+                int sid = -1;
+                if (enable_diar) {
+                    // Use 40 mel bands for better speaker discrimination
+                    auto emb = diar::compute_logmel_embedding(acc16k.data(), acc16k.size(), target_hz, 40);
+                    sid = spk.assign(emb);
+                }
+                auto segTxt = whisper.transcribe_chunk(acc16k.data(), acc16k.size());
+                auto merged = dedup.merge(segTxt);
+                std::string txt;
+                if (!merged.empty() && sid >= 0) txt = std::string("[S") + std::to_string(sid) + "] " + merged;
+                else txt = merged;
+                if (!txt.empty()) {
+                    if (verbose) std::cerr << "\n";
+                    std::cout << txt << "\n" << std::flush;
+                }
+            }
+            
+            processing_done = true;
+        });
+    }
+    
+    // Main thread: audio capture and playback (never blocks on processing)
+    auto t0 = std::chrono::steady_clock::now();
+    auto audio_start_time = t0; // Track when audio playback started
+    uint64_t audio_frames_played = 0; // Track how many frames we've sent to speaker
+    
+    while (true) {
+        std::vector<int16_t> chunk;
+        if (useFile) chunk = fileCap.read_chunk();
+        else chunk = micCap.read_chunk();
+
+        if (!chunk.empty()) {
+            if (recordMic && wavOut.out) {
+                wavOut.write(chunk.data(), chunk.size());
+            }
+            
+            // Play audio immediately (with real-time pacing for file mode)
+            if (useFile && play_file) {
+                // Before playing, wait if we're ahead of real-time
+                audio_frames_played += chunk.size();
+                double audio_time = static_cast<double>(audio_frames_played) / static_cast<double>(in_sr);
+                auto target_time = audio_start_time + std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+                    std::chrono::duration<double>(audio_time));
+                auto now = std::chrono::steady_clock::now();
+                if (now < target_time) {
+                    std::this_thread::sleep_until(target_time);
+                }
+                
+                speaker.write(reinterpret_cast<const short*>(chunk.data()), 
+                            static_cast<unsigned long long>(chunk.size()));
+            }
+            
+            if (print_levels) {
+                double sum2 = 0.0;
+                for (auto s : chunk) { double v = s / 32768.0; sum2 += v*v; }
+                double rms = std::sqrt(sum2 / std::max<size_t>(1, chunk.size()));
+                double dbfs = (rms > 0) ? 20.0 * std::log10(rms) : -120.0;
+                std::cerr << "[level] " << std::fixed << std::setprecision(1) << dbfs << " dBFS\n";
+            }
+            
+            // Save chunk size before move
+            size_t chunk_size = chunk.size();
+            
+            // Queue for processing (never blocks - drops oldest if full)
+            if (enable_asr) {
+                audio::AudioQueue::Chunk qchunk;
+                qchunk.samples = std::move(chunk);
+                qchunk.sample_rate = in_sr;
+                audioQueue.push(std::move(qchunk)); // Never blocks
+            }
+            
+            if (useFile) {
+                processed_in_samples += chunk_size;
+            }
+        } else if (useFile) {
+            // EOF
+            break;
+        }
+
+        // Check limits
+        if (limit_sec > 0) {
+            if (useFile) {
+                if (processed_in_samples >= static_cast<uint64_t>(limit_sec) * static_cast<uint64_t>(in_sr)) {
+                    break;
+                }
+            } else {
+                auto now = std::chrono::steady_clock::now();
+                double elapsed = std::chrono::duration<double>(now - t0).count();
+                if (elapsed >= limit_sec) break;
+            }
+        }
+
+        // Throttle only for mic
+        if (!useFile) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        }
+    }
+    
+    // Signal processing thread to stop
+    audioQueue.stop();
+    if (processing_thread.joinable()) {
+        processing_thread.join();
+    }
+    
+    if (recordMic && wavOut.out) wavOut.close();
+    if (!useFile) micCap.stop(); else fileCap.stop();
+    if (useFile && play_file) speaker.stop();
+    if (verbose) std::cerr << "\n";
+    
+    // Performance summary
+    auto t1 = std::chrono::steady_clock::now();
+    double wall = std::chrono::duration<double>(t1 - t0).count();
+    double audio_sec = useFile ? (processed_in_samples.load() / double(std::max(1, in_sr))) : wall;
+    double rt_factor = (wall > 0) ? (audio_sec / wall) : 0.0;
+    
+    double resample_acc, diar_acc, whisper_acc;
+    perf.get(resample_acc, diar_acc, whisper_acc);
+    
+    size_t dropped = audioQueue.dropped_count();
+    
+    std::cerr << "\n[perf] audio_sec=" << std::fixed << std::setprecision(3) << audio_sec
+              << ", wall_sec=" << wall
+              << ", xRealtime=" << rt_factor
+              << ", t_resample=" << resample_acc
+              << ", t_diar=" << diar_acc
+              << ", t_whisper=" << whisper_acc;
+    if (dropped > 0) {
+        std::cerr << "\n[warn] " << dropped << " chunks dropped (processing too slow)";
+    }
+    std::cerr << "\n";
     std::cerr << "[done] exit=0\n";
     return 0;
 }
