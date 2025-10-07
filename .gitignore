@@ -1,2 +1,7 @@
 build/
 output/
+
+# Debug and log files
+*.log
+debug_output.txt
+transcribe_file_debug.log
