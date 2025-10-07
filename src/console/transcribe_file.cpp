@@ -307,29 +307,26 @@ int main(int argc, char** argv) {
     std::atomic<bool> processing_done{false};
     std::atomic<uint64_t> processed_in_samples{0};
     PerfMetrics perf;
+    std::mutex print_mtx;  // For thread-safe output
     
     // Processing thread: handles resampling, diarization, and ASR
     std::thread processing_thread;
     if (enable_asr) {
         processing_thread = std::thread([&]() {
-            // CONTINUOUS STREAM ARCHITECTURE v3: Fine-grained frame analysis
-            // Phase 2 Implementation:
-            // - Extract speaker embeddings every 250ms (independent of Whisper)
-            // - Build high-resolution speaker activity timeline
-            // - Whisper transcribes when enough audio accumulated
-            // - Map speaker frames to transcribed words
-            // - This enables detecting speaker changes at 250ms granularity
+            // ORIGINAL PROVEN SEGMENTATION STRATEGY
+            // - Accumulate audio in acc16k buffer
+            // - Transcribe when window is full (1.5s)
+            // - Keep 0.5s overlap for context
+            // DO NOT MODIFY - see specs/architecture.md for why this works
             
-            std::vector<int16_t> audio_stream;  // Continuous audio buffer
-            size_t last_transcribed_position = 0;
-            const int target_hz = 16000;
-            const size_t min_transcribe_samples = target_hz * 1.5;  // Minimum 1.5s for good context
-            const size_t max_transcribe_samples = target_hz * 4;    // Maximum 4s before forcing transcription
-            
+            std::vector<int16_t> acc16k;
+            diar::SpeakerClusterer spk(2, 0.60f);
             Deduper dedup;
-            int prev_speaker = -1;
+            const int target_hz = 16000;
+            const size_t window_samples = static_cast<size_t>(target_hz * 1.5);
+            const size_t overlap_samples = static_cast<size_t>(target_hz * 0.5);
             
-            // Phase 2: Continuous frame analyzer
+            // Phase 2: Continuous frame analyzer (PARALLEL - does not affect Whisper)
             diar::ContinuousFrameAnalyzer::Config frame_config;
             frame_config.hop_ms = 250;      // 4 frames per second
             frame_config.window_ms = 1000;  // 1s window for each embedding
@@ -337,11 +334,10 @@ int main(int argc, char** argv) {
             frame_config.verbose = verbose;
             diar::ContinuousFrameAnalyzer frame_analyzer(target_hz, frame_config);
             
-            fprintf(stderr, "[Phase2] ContinuousFrameAnalyzer initialized: hop=%dms, window=%dms\n",
-                    frame_config.hop_ms, frame_config.window_ms);
-            
-            // Simple energy-based segmentation (no continuous tracking needed)
-            auto last_energy_check = std::chrono::steady_clock::now();
+            if (verbose) {
+                fprintf(stderr, "[Phase2] Frame analyzer: hop=%dms, window=%dms\n",
+                        frame_config.hop_ms, frame_config.window_ms);
+            }
             
             while (true) {
                 audio::AudioQueue::Chunk chunk;
@@ -355,193 +351,94 @@ int main(int argc, char** argv) {
                 auto t_res1 = std::chrono::steady_clock::now();
                 perf.add_resample(std::chrono::duration<double>(t_res1 - t_res0).count());
                 
-                // Add to continuous stream
-                audio_stream.insert(audio_stream.end(), ds.begin(), ds.end());
+                // Original: Accumulate in acc16k
+                acc16k.insert(acc16k.end(), ds.begin(), ds.end());
                 
-                // Phase 2: Extract frames continuously as audio arrives
+                // Phase 2 (PARALLEL): Feed to frame analyzer (read-only, doesn't affect Whisper)
                 int new_frames = frame_analyzer.add_audio(ds.data(), ds.size());
                 if (verbose && new_frames > 0) {
-                    fprintf(stderr, "[+%d frames, total=%zu] ", 
-                            new_frames, frame_analyzer.frame_count());
+                    fprintf(stderr, "[+%d] ", new_frames);
                 }
                 
                 if (verbose) { std::cerr << "." << std::flush; }
                 
-                // Check periodically if we should transcribe (every 500ms)
-                auto now = std::chrono::steady_clock::now();
-                auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - last_energy_check);
-                
-                if (elapsed.count() >= 500) {
-                    last_energy_check = now;
+                // Process window if ready (ORIGINAL LOGIC - DO NOT MODIFY)
+                if (acc16k.size() >= window_samples) {
+                    // Gate mostly-silent windows
+                    double sum2 = 0.0;
+                    for (auto s : acc16k) { double v = s / 32768.0; sum2 += v*v; }
+                    double rms = std::sqrt(sum2 / std::max<size_t>(1, acc16k.size()));
+                    double dbfs = (rms > 0) ? 20.0 * std::log10(rms) : -120.0;
                     
-                    size_t pending_samples = audio_stream.size() - last_transcribed_position;
-                    bool should_transcribe = false;
-                    
-                    if (pending_samples >= max_transcribe_samples) {
-                        // Reached maximum length - must transcribe
-                        should_transcribe = true;
-                    } else if (pending_samples >= min_transcribe_samples) {
-                        // Check for pause (simple energy-based)
-                        size_t check_start = audio_stream.size() - target_hz / 2;  // Last 0.5s
-                        if (check_start < audio_stream.size()) {
-                            double sum2 = 0.0;
-                            for (size_t i = check_start; i < audio_stream.size(); ++i) {
-                                double v = audio_stream[i] / 32768.0;
-                                sum2 += v * v;
-                            }
-                            double rms = std::sqrt(sum2 / (audio_stream.size() - check_start));
-                            double dbfs = (rms > 0) ? 20.0 * std::log10(rms) : -120.0;
-                            
-                            if (dbfs < -50.0) {
-                                // Pause detected
-                                should_transcribe = true;
-                            }
-                        }
-                    }
-                    
-                    if (should_transcribe) {
-                        // Check overall energy gate
-                        double sum2 = 0.0;
-                        for (size_t i = last_transcribed_position; i < audio_stream.size(); ++i) {
-                            double v = audio_stream[i] / 32768.0;
-                            sum2 += v * v;
-                        }
-                        double rms = std::sqrt(sum2 / pending_samples);
-                        double dbfs = (rms > 0) ? 20.0 * std::log10(rms) : -120.0;
-                        
-                        if (dbfs > -55.0 && enable_diar) {
-                            // Transcribe with segments
-                            auto t_w0 = std::chrono::steady_clock::now();
-                            auto whisper_segments = whisper.transcribe_chunk_segments(
-                                audio_stream.data() + last_transcribed_position,
-                                pending_samples
-                            );
-                            auto t_w1 = std::chrono::steady_clock::now();
-                            perf.add_whisper(std::chrono::duration<double>(t_w1 - t_w0).count());
-                            
-                            // Convert to diarization format and assign speakers
-                            std::vector<diar::TranscriptSegment> diar_segments;
-                            int64_t offset_ms = (last_transcribed_position * 1000) / target_hz;
-                            
-                            for (const auto& wseg : whisper_segments) {
-                                diar::TranscriptSegment dseg;
-                                dseg.text = wseg.text;
-                                dseg.t0_ms = wseg.t0_ms + offset_ms;
-                                dseg.t1_ms = wseg.t1_ms + offset_ms;
-                                dseg.speaker_id = -1;  // Will be assigned
-                                diar_segments.push_back(dseg);
-                            }
-                            
-                            // Post-process with speaker diarization
+                    std::string txt;
+                    if (dbfs > -55.0) {
+                        int sid = -1;
+                        if (enable_diar) {
                             auto t_d0 = std::chrono::steady_clock::now();
-                            auto speaker_segments = diar::assign_speakers_to_segments(
-                                diar_segments,
-                                audio_stream.data(),
-                                audio_stream.size(),
-                                target_hz,
-                                2,      // max_speakers
-                                false   // verbose
-                            );
+                            // Use 40 mel bands for better speaker discrimination
+                            auto emb = diar::compute_speaker_embedding(acc16k.data(), acc16k.size(), target_hz);
+                            sid = spk.assign(emb);
                             auto t_d1 = std::chrono::steady_clock::now();
                             perf.add_diar(std::chrono::duration<double>(t_d1 - t_d0).count());
-                            
-                            // Output segments with speaker labels
-                            for (const auto& seg : speaker_segments) {
-                                std::string merged = dedup.merge(seg.text);
-                                if (!merged.empty() && seg.speaker_id >= 0) {
-                                    if (seg.speaker_id != prev_speaker && prev_speaker >= 0) {
-                                        std::cout << "\n[S" << seg.speaker_id << "] " << merged << std::flush;
-                                    } else if (prev_speaker < 0) {
-                                        std::cout << "\n[S" << seg.speaker_id << "] " << merged << std::flush;
-                                    } else {
-                                        std::cout << " " << merged << std::flush;
-                                    }
-                                    prev_speaker = seg.speaker_id;
-                                }
-                            }
-                            
-                            // Mark as transcribed
-                            last_transcribed_position = audio_stream.size();
-                        } else if (dbfs > -55.0) {
-                            // No diarization - simple transcription
-                            auto t_w0 = std::chrono::steady_clock::now();
-                            std::string whisper_text = whisper.transcribe_chunk(
-                                audio_stream.data() + last_transcribed_position,
-                                pending_samples
-                            );
-                            auto t_w1 = std::chrono::steady_clock::now();
-                            perf.add_whisper(std::chrono::duration<double>(t_w1 - t_w0).count());
-                            
-                            std::string merged = dedup.merge(whisper_text);
-                            if (!merged.empty()) {
-                                std::cout << " " << merged << std::flush;
-                            }
-                            
-                            last_transcribed_position = audio_stream.size();
                         }
+                        
+                        // Whisper
+                        auto t_w0 = std::chrono::steady_clock::now();
+                        std::string segTxt = whisper.transcribe_chunk(acc16k.data(), acc16k.size());
+                        auto t_w1 = std::chrono::steady_clock::now();
+                        perf.add_whisper(std::chrono::duration<double>(t_w1 - t_w0).count());
+                        
+                        // Remove overlap-duplicated prefix words
+                        std::string merged = dedup.merge(segTxt);
+                        if (!merged.empty() && sid >= 0) txt = std::string("[S") + std::to_string(sid) + "] " + merged;
+                        else txt = merged;
                     }
-                }
-                
-                // Trim old audio to prevent unbounded growth (keep last 10s)
-                const size_t max_buffer_samples = target_hz * 10;
-                if (audio_stream.size() > max_buffer_samples && last_transcribed_position > target_hz * 5) {
-                    size_t trim_amount = last_transcribed_position - target_hz * 1; // Keep 1s overlap
-                    audio_stream.erase(audio_stream.begin(), audio_stream.begin() + trim_amount);
-                    last_transcribed_position -= trim_amount;
-                }
-            }
-            
-            // Final flush - transcribe any remaining audio
-            size_t pending_samples = audio_stream.size() - last_transcribed_position;
-            if (pending_samples >= min_transcribe_samples && enable_diar) {
-                auto whisper_segments = whisper.transcribe_chunk_segments(
-                    audio_stream.data() + last_transcribed_position,
-                    pending_samples
-                );
-                
-                std::vector<diar::TranscriptSegment> diar_segments;
-                int64_t offset_ms = (last_transcribed_position * 1000) / target_hz;
-                
-                for (const auto& wseg : whisper_segments) {
-                    diar::TranscriptSegment dseg;
-                    dseg.text = wseg.text;
-                    dseg.t0_ms = wseg.t0_ms + offset_ms;
-                    dseg.t1_ms = wseg.t1_ms + offset_ms;
-                    dseg.speaker_id = -1;
-                    diar_segments.push_back(dseg);
-                }
-                
-                auto speaker_segments = diar::assign_speakers_to_segments(
-                    diar_segments,
-                    audio_stream.data(),
-                    audio_stream.size(),
-                    target_hz,
-                    2,
-                    false
-                );
-                
-                for (const auto& seg : speaker_segments) {
-                    std::string merged = dedup.merge(seg.text);
-                    if (!merged.empty() && seg.speaker_id >= 0) {
-                        if (seg.speaker_id != prev_speaker && prev_speaker >= 0) {
-                            std::cout << "\n[S" << seg.speaker_id << "] " << merged << std::flush;
-                        } else {
-                            std::cout << " " << merged << std::flush;
-                        }
+                    
+                    if (!txt.empty()) {
+                        std::lock_guard<std::mutex> lock(print_mtx);
+                        fprintf(stderr, "\n%s", txt.c_str());
+                        fflush(stderr);
+                    }
+                    
+                    // Keep overlap
+                    if (acc16k.size() > overlap_samples) {
+                        std::vector<int16_t> tail(acc16k.end() - overlap_samples, acc16k.end());
+                        acc16k.swap(tail);
+                    } else {
+                        acc16k.clear();
                     }
                 }
             }
             
-            // Final newline and frame statistics
-            std::cout << "\n" << std::flush;
+            // Final flush if we have a full window (ORIGINAL LOGIC)
+            if (acc16k.size() >= window_samples) {
+                int sid = -1;
+                if (enable_diar) {
+                    // Use 40 mel bands for better speaker discrimination
+                    auto emb = diar::compute_speaker_embedding(acc16k.data(), acc16k.size(), target_hz);
+                    sid = spk.assign(emb);
+                }
+                auto segTxt = whisper.transcribe_chunk(acc16k.data(), acc16k.size());
+                auto merged = dedup.merge(segTxt);
+                std::string txt;
+                if (!merged.empty() && sid >= 0) txt = std::string("[S") + std::to_string(sid) + "] " + merged;
+                else txt = merged;
+                if (!txt.empty()) {
+                    std::lock_guard<std::mutex> lock(print_mtx);
+                    fprintf(stderr, "\n%s", txt.c_str());
+                    fflush(stderr);
+                }
+            }
             
-            fprintf(stderr, "\n[Phase2] Frame statistics:\n");
+            // Phase 2: Frame statistics
+            fprintf(stderr, "\n\n[Phase2] Frame statistics:\n");
             fprintf(stderr, "  - Total frames extracted: %zu\n", frame_analyzer.frame_count());
             fprintf(stderr, "  - Coverage duration: %.1fs\n", frame_analyzer.duration_ms() / 1000.0);
             fprintf(stderr, "  - Frames per second: %.1f\n", 
                     frame_analyzer.duration_ms() > 0 
                         ? (frame_analyzer.frame_count() * 1000.0) / frame_analyzer.duration_ms()
                         : 0.0);
+            fprintf(stderr, "\n");
             
             processing_done = true;
         });

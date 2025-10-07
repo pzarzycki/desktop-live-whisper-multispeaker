@@ -355,3 +355,6 @@ argv: [0]=C:\PRJ\VAM\desktop-live-whisper-multiplatform\build\tests-only-release
 
 === run at Tue Oct  7 11:00:04 2025
 argv: [0]=C:\PRJ\VAM\desktop-live-whisper-multiplatform\build\tests-only-release\app_transcribe_file.exe [1]=test_data\Sean_Carroll_podcast.wav [2]=--limit-seconds [3]=10
+
+=== run at Tue Oct  7 11:10:46 2025
+argv: [0]=C:\PRJ\VAM\desktop-live-whisper-multiplatform\build\tests-only-release\app_transcribe_file.exe [1]=test_data\Sean_Carroll_podcast.wav [2]=--play-file [3]=--limit-seconds [4]=20
