@@ -344,10 +344,10 @@ std::vector<TranscriptSegment> assign_speakers_to_segments(
         
         int majority_speaker = frame_speakers[0];
         int max_votes = 0;
-        for (const auto& [spk, count] : vote_counts) {
-            if (count > max_votes) {
-                max_votes = count;
-                majority_speaker = spk;
+        for (const auto& pair : vote_counts) {
+            if (pair.second > max_votes) {
+                max_votes = pair.second;
+                majority_speaker = pair.first;
             }
         }
         
@@ -542,6 +542,79 @@ void ContinuousFrameAnalyzer::update_speaker_ids(const std::vector<int>& speaker
 int64_t ContinuousFrameAnalyzer::duration_ms() const {
     if (m_frames.empty()) return 0;
     return m_frames.back().t_end_ms - m_frames.front().t_start_ms;
+}
+
+void ContinuousFrameAnalyzer::cluster_frames(int max_speakers, float threshold) {
+    if (m_frames.empty()) {
+        if (m_config.verbose) {
+            fprintf(stderr, "[cluster_frames] No frames to cluster\n");
+        }
+        return;
+    }
+    
+    if (m_config.verbose) {
+        fprintf(stderr, "[cluster_frames] Clustering %zu frames with max_speakers=%d, threshold=%.2f\n",
+                m_frames.size(), max_speakers, threshold);
+    }
+    
+    // Initialize first frame as Speaker 0
+    m_frames[0].speaker_id = 0;
+    m_frames[0].confidence = 1.0f;
+    
+    // Maintain speaker centroids (running averages)
+    std::vector<std::vector<float>> centroids;
+    centroids.push_back(m_frames[0].embedding);
+    std::vector<int> centroid_counts;
+    centroid_counts.push_back(1);
+    
+    // Cluster remaining frames
+    for (size_t i = 1; i < m_frames.size(); ++i) {
+        // Find best matching centroid
+        int best_speaker = 0;
+        float best_sim = cosine(m_frames[i].embedding, centroids[0]);
+        
+        for (size_t s = 1; s < centroids.size(); ++s) {
+            float sim = cosine(m_frames[i].embedding, centroids[s]);
+            if (sim > best_sim) {
+                best_sim = sim;
+                best_speaker = static_cast<int>(s);
+            }
+        }
+        
+        // Create new speaker if similarity too low and haven't hit max
+        if (best_sim < threshold && static_cast<int>(centroids.size()) < max_speakers) {
+            best_speaker = static_cast<int>(centroids.size());
+            centroids.push_back(m_frames[i].embedding);
+            centroid_counts.push_back(1);
+            m_frames[i].speaker_id = best_speaker;
+            m_frames[i].confidence = 1.0f;
+            
+            if (m_config.verbose) {
+                fprintf(stderr, "[cluster_frames] Frame %zu: Created new speaker S%d (sim=%.3f < threshold=%.3f)\n",
+                        i, best_speaker, best_sim, threshold);
+            }
+        } else {
+            // Assign to best matching speaker
+            m_frames[i].speaker_id = best_speaker;
+            m_frames[i].confidence = best_sim;
+            
+            // Update centroid (running average)
+            int count = centroid_counts[best_speaker];
+            for (size_t d = 0; d < centroids[best_speaker].size(); ++d) {
+                centroids[best_speaker][d] = 
+                    (centroids[best_speaker][d] * count + m_frames[i].embedding[d]) / (count + 1);
+            }
+            centroid_counts[best_speaker]++;
+        }
+    }
+    
+    // Report clustering results
+    if (m_config.verbose) {
+        fprintf(stderr, "[cluster_frames] Clustering complete: %zu speakers\n", centroids.size());
+        for (size_t s = 0; s < centroids.size(); ++s) {
+            fprintf(stderr, "  Speaker %zu: %d frames\n", s, centroid_counts[s]);
+        }
+    }
 }
 
 } // namespace diar

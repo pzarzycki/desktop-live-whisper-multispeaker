@@ -11,3 +11,9 @@ This file should be updated as the project evolves.
 
 Document there all important findings and changes to the architecture, tech stack, libraries, and project structure.
 
+## Current Active Task important details
+
+Keep all important information about current effort, assumptions, decisions and objectives in `/spec/plan.md`. Consult it often to stay on track. Mark clearly what's done and what remains. If something is not clear, update the plan.
+
+Plan HAS to work in coordination with `/spec/architecture.md` and `/spec/continuous_architecture_findings.md`.
+

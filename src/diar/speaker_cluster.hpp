@@ -117,6 +117,11 @@ public:
     // Assign speaker IDs to frames (called by clustering manager)
     void update_speaker_ids(const std::vector<int>& speaker_ids);
     
+    // Simple clustering of all frames into speakers
+    // Call this after all audio is processed
+    // Updates speaker_id field in each frame
+    void cluster_frames(int max_speakers = 2, float threshold = 0.50f);
+    
     // Get statistics
     size_t frame_count() const { return m_frames.size(); }
     int64_t duration_ms() const;

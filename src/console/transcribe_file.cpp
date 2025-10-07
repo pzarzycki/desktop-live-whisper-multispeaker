@@ -16,6 +16,7 @@
 #include <cctype>
 #include <atomic>
 #include <mutex>
+#include <map>
 #include "asr/whisper_backend.hpp"
 #include "audio/windows_wasapi.hpp"
 #include "audio/file_capture.hpp"
@@ -320,11 +321,21 @@ int main(int argc, char** argv) {
             // DO NOT MODIFY - see specs/architecture.md for why this works
             
             std::vector<int16_t> acc16k;
-            diar::SpeakerClusterer spk(2, 0.60f);
+            diar::SpeakerClusterer spk(2, 0.45f);  // Lowered from 0.60 to make 2nd speaker easier to create
             Deduper dedup;
             const int target_hz = 16000;
             const size_t window_samples = static_cast<size_t>(target_hz * 1.5);
             const size_t overlap_samples = static_cast<size_t>(target_hz * 0.5);
+            
+            // Track segments for frame-based speaker assignment
+            struct SegmentInfo {
+                std::string text;
+                int64_t t_start_ms;
+                int64_t t_end_ms;
+                int speaker_id;  // Will be assigned from frames
+            };
+            std::vector<SegmentInfo> segments;
+            int64_t audio_time_ms = 0;  // Track position in audio stream
             
             // Phase 2: Continuous frame analyzer (PARALLEL - does not affect Whisper)
             diar::ContinuousFrameAnalyzer::Config frame_config;
@@ -390,17 +401,28 @@ int main(int argc, char** argv) {
                         
                         // Remove overlap-duplicated prefix words
                         std::string merged = dedup.merge(segTxt);
-                        if (!merged.empty() && sid >= 0) txt = std::string("[S") + std::to_string(sid) + "] " + merged;
-                        else txt = merged;
+                        
+                        // Store segment with timing for frame-based speaker assignment
+                        if (!merged.empty()) {
+                            SegmentInfo seg;
+                            seg.text = merged;
+                            seg.t_start_ms = audio_time_ms;
+                            seg.t_end_ms = audio_time_ms + (acc16k.size() * 1000) / target_hz;
+                            seg.speaker_id = sid;  // Temporary, will be reassigned from frames
+                            segments.push_back(seg);
+                            
+                            if (verbose) {
+                                std::lock_guard<std::mutex> lock(print_mtx);
+                                fprintf(stderr, "\n[temp S%d] %s", sid, merged.c_str());
+                                fflush(stderr);
+                            }
+                        }
                     }
                     
-                    if (!txt.empty()) {
-                        std::lock_guard<std::mutex> lock(print_mtx);
-                        fprintf(stderr, "\n%s", txt.c_str());
-                        fflush(stderr);
-                    }
+                    // Update audio time position
+                    audio_time_ms += (acc16k.size() * 1000) / target_hz;
                     
-                    // Keep overlap
+                    // Keep overlap (don't update audio_time_ms for overlap portion)
                     if (acc16k.size() > overlap_samples) {
                         std::vector<int16_t> tail(acc16k.end() - overlap_samples, acc16k.end());
                         acc16k.swap(tail);
@@ -420,15 +442,78 @@ int main(int argc, char** argv) {
                 }
                 auto segTxt = whisper.transcribe_chunk(acc16k.data(), acc16k.size());
                 auto merged = dedup.merge(segTxt);
-                std::string txt;
-                if (!merged.empty() && sid >= 0) txt = std::string("[S") + std::to_string(sid) + "] " + merged;
-                else txt = merged;
-                if (!txt.empty()) {
-                    std::lock_guard<std::mutex> lock(print_mtx);
-                    fprintf(stderr, "\n%s", txt.c_str());
-                    fflush(stderr);
+                
+                if (!merged.empty()) {
+                    SegmentInfo seg;
+                    seg.text = merged;
+                    seg.t_start_ms = audio_time_ms;
+                    seg.t_end_ms = audio_time_ms + (acc16k.size() * 1000) / target_hz;
+                    seg.speaker_id = sid;
+                    segments.push_back(seg);
                 }
             }
+            
+            // Phase 2b: Cluster frames and reassign speakers
+            fprintf(stderr, "\n\n[Phase2] Clustering %zu frames...\n", frame_analyzer.frame_count());
+            if (frame_analyzer.frame_count() > 0) {
+                frame_analyzer.cluster_frames(2, 0.50f);  // max_speakers=2, threshold=0.50
+                
+                fprintf(stderr, "[Phase2] Reassigning speakers to %zu segments...\n", segments.size());
+                
+                // Reassign speaker IDs to segments based on frames
+                int seg_num = 0;
+                for (auto& seg : segments) {
+                    auto frames = frame_analyzer.get_frames_in_range(seg.t_start_ms, seg.t_end_ms);
+                    
+                    if (seg_num < 3) {
+                        fprintf(stderr, "[seg %d] t=[%lld, %lld]ms, found %zu frames\n", 
+                                seg_num, seg.t_start_ms, seg.t_end_ms, frames.size());
+                    }
+                    
+                    if (!frames.empty()) {
+                        // Majority vote from frames
+                        std::map<int, int> vote_counts;
+                        for (const auto& frame : frames) {
+                            if (frame.speaker_id >= 0) {
+                                vote_counts[frame.speaker_id]++;
+                            }
+                        }
+                        
+                        if (seg_num < 3) {
+                            fprintf(stderr, "  vote_counts: ");
+                            for (const auto& pair : vote_counts) {
+                                fprintf(stderr, "S%d=%d ", pair.first, pair.second);
+                            }
+                            fprintf(stderr, "\n");
+                        }
+                        
+                        int best_speaker = -1;
+                        int max_votes = 0;
+                        for (const auto& pair : vote_counts) {
+                            if (pair.second > max_votes) {
+                                max_votes = pair.second;
+                                best_speaker = pair.first;
+                            }
+                        }
+                        
+                        if (best_speaker >= 0) {
+                            seg.speaker_id = best_speaker;
+                        }
+                    }
+                    seg_num++;
+                }
+            }
+            
+            // Output all segments with final speaker assignments
+            fprintf(stderr, "\n=== Transcription with Speaker Diarization ===\n");
+            for (const auto& seg : segments) {
+                if (seg.speaker_id >= 0) {
+                    fprintf(stderr, "\n[S%d] %s", seg.speaker_id, seg.text.c_str());
+                } else {
+                    fprintf(stderr, "\n%s", seg.text.c_str());
+                }
+            }
+            fprintf(stderr, "\n");
             
             // Phase 2: Frame statistics
             fprintf(stderr, "\n\n[Phase2] Frame statistics:\n");
