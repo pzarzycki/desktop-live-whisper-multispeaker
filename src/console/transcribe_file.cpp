@@ -367,28 +367,16 @@ int main(int argc, char** argv) {
                 
                 // Phase 2 (PARALLEL): Feed to frame analyzer (read-only, doesn't affect Whisper)
                 int new_frames = frame_analyzer.add_audio(ds.data(), ds.size());
-                if (verbose && new_frames > 0) {
-                    fprintf(stderr, "[+%d] ", new_frames);
-                }
                 
                 if (verbose) { std::cerr << "." << std::flush; }
                 
                 // Process window if ready (ORIGINAL LOGIC - DO NOT MODIFY)
                 if (acc16k.size() >= window_samples) {
-                    if (verbose) {
-                        fprintf(stderr, "\n[DEBUG] Processing window: acc16k.size()=%zu, window_samples=%zu\n",
-                                acc16k.size(), window_samples);
-                    }
-                    
                     // Gate mostly-silent windows
                     double sum2 = 0.0;
                     for (auto s : acc16k) { double v = s / 32768.0; sum2 += v*v; }
                     double rms = std::sqrt(sum2 / std::max<size_t>(1, acc16k.size()));
                     double dbfs = (rms > 0) ? 20.0 * std::log10(rms) : -120.0;
-                    
-                    if (verbose) {
-                        fprintf(stderr, "[DEBUG] dbfs=%.2f (threshold=-55.0)\n", dbfs);
-                    }
                     
                     std::string txt;
                     if (dbfs > -55.0) {
@@ -410,11 +398,6 @@ int main(int argc, char** argv) {
                         
                         // Remove overlap-duplicated prefix words
                         std::string merged = dedup.merge(segTxt);
-                        
-                        if (verbose) {
-                            fprintf(stderr, "[DEBUG] Whisper returned: '%s', merged: '%s'\n", 
-                                    segTxt.c_str(), merged.c_str());
-                        }
                         
                         // Store segment with timing for frame-based speaker assignment
                         if (!merged.empty()) {
@@ -469,14 +452,41 @@ int main(int argc, char** argv) {
             
             // Phase 2b: Cluster frames and reassign speakers
             fprintf(stderr, "\n\n[Phase2] Clustering %zu frames...\n", frame_analyzer.frame_count());
-            fprintf(stderr, "[DEBUG] Before clustering: segments.size()=%zu\n", segments.size());
+            
+            // Phase 2b-2: Speaker run detection for improved voting
+            struct SpeakerRun {
+                int speaker_id;
+                int start_idx;
+                int end_idx;
+                int length() const { return end_idx - start_idx + 1; }
+            };
+            
+            auto detect_speaker_runs = [](const std::vector<diar::ContinuousFrameAnalyzer::Frame>& frames) 
+                -> std::vector<SpeakerRun> {
+                std::vector<SpeakerRun> runs;
+                if (frames.empty()) return runs;
+                
+                int current_speaker = frames[0].speaker_id;
+                int run_start = 0;
+                
+                for (size_t i = 1; i <= frames.size(); ++i) {
+                    if (i == frames.size() || frames[i].speaker_id != current_speaker) {
+                        runs.push_back({current_speaker, run_start, static_cast<int>(i - 1)});
+                        if (i < frames.size()) {
+                            current_speaker = frames[i].speaker_id;
+                            run_start = static_cast<int>(i);
+                        }
+                    }
+                }
+                return runs;
+            };
             
             if (frame_analyzer.frame_count() > 0) {
                 frame_analyzer.cluster_frames(2, 0.50f);  // max_speakers=2, threshold=0.50
                 
                 fprintf(stderr, "[Phase2] Reassigning speakers to %zu segments...\n", segments.size());
                 
-                // Reassign speaker IDs to segments based on frames
+                // Reassign speaker IDs to segments based on frames with run-based voting
                 int seg_num = 0;
                 for (auto& seg : segments) {
                     auto frames = frame_analyzer.get_frames_in_range(seg.t_start_ms, seg.t_end_ms);
@@ -487,33 +497,73 @@ int main(int argc, char** argv) {
                     }
                     
                     if (!frames.empty()) {
-                        // Majority vote from frames
-                        std::map<int, int> vote_counts;
-                        for (const auto& frame : frames) {
-                            if (frame.speaker_id >= 0) {
-                                vote_counts[frame.speaker_id]++;
-                            }
-                        }
+                        // Phase 2b-2: Run-based voting with transition detection
+                        auto runs = detect_speaker_runs(frames);
                         
-                        if (seg_num < 3) {
-                            fprintf(stderr, "  vote_counts: ");
-                            for (const auto& pair : vote_counts) {
-                                fprintf(stderr, "S%d=%d ", pair.first, pair.second);
+                        if (seg_num < 3 && verbose) {
+                            fprintf(stderr, "  runs: ");
+                            for (const auto& run : runs) {
+                                fprintf(stderr, "S%d[%d-%d:%d] ", 
+                                        run.speaker_id, run.start_idx, run.end_idx, run.length());
                             }
                             fprintf(stderr, "\n");
                         }
                         
-                        int best_speaker = -1;
-                        int max_votes = 0;
-                        for (const auto& pair : vote_counts) {
-                            if (pair.second > max_votes) {
-                                max_votes = pair.second;
-                                best_speaker = pair.first;
+                        int assigned_speaker = -1;
+                        bool has_transition = false;
+                        int secondary_speaker = -1;
+                        
+                        if (!runs.empty()) {
+                            // Find longest run
+                            SpeakerRun longest_run = runs[0];
+                            int longest_length = runs[0].length();
+                            
+                            for (const auto& run : runs) {
+                                int length = run.length();
+                                if (length > longest_length) {
+                                    longest_length = length;
+                                    longest_run = run;
+                                }
+                            }
+                            
+                            // Check if dominant (>70% coverage)
+                            float coverage = static_cast<float>(longest_length) / frames.size();
+                            
+                            if (coverage > 0.70f) {
+                                // Clear dominant speaker
+                                assigned_speaker = longest_run.speaker_id;
+                                
+                                if (seg_num < 3 && verbose) {
+                                    fprintf(stderr, "  → dominant S%d (coverage=%.1f%%)\n", 
+                                            assigned_speaker, coverage * 100.0f);
+                                }
+                            } else {
+                                // Mixed segment: detect transition
+                                has_transition = (runs.size() > 1 && 
+                                                runs[0].speaker_id != runs.back().speaker_id);
+                                
+                                if (has_transition) {
+                                    // Assign to last speaker (person speaking at segment end)
+                                    assigned_speaker = frames.back().speaker_id;
+                                    secondary_speaker = runs[0].speaker_id;
+                                    
+                                    if (seg_num < 3 && verbose) {
+                                        fprintf(stderr, "  → transition S%d→S%d, assigned to S%d (last)\n",
+                                                secondary_speaker, assigned_speaker, assigned_speaker);
+                                    }
+                                } else {
+                                    // Same speaker at boundaries or single run
+                                    assigned_speaker = longest_run.speaker_id;
+                                    
+                                    if (seg_num < 3 && verbose) {
+                                        fprintf(stderr, "  → mixed but consistent S%d\n", assigned_speaker);
+                                    }
+                                }
                             }
                         }
                         
-                        if (best_speaker >= 0) {
-                            seg.speaker_id = best_speaker;
+                        if (assigned_speaker >= 0) {
+                            seg.speaker_id = assigned_speaker;
                         }
                     }
                     seg_num++;

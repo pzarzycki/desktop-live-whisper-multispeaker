@@ -180,10 +180,6 @@ std::string WhisperBackend::transcribe_chunk(const int16_t* data, size_t samples
 		if (txt) {
 			std::string s(txt);
 			
-			if (is_verbose()) {
-				std::cerr << "[whisper_backend DEBUG] Raw segment[" << i << "]: '" << s << "'\n";
-			}
-			
 			// Filter common non-speech tokens
 			auto trim = [](std::string& x){
 				size_t a = x.find_first_not_of(" \t\r\n");
@@ -224,23 +220,12 @@ std::string WhisperBackend::transcribe_chunk(const int16_t* data, size_t samples
 			
 			trim(s);
 			
-			if (is_verbose() && !s.empty()) {
-				std::cerr << "[whisper_backend DEBUG] After cleaning: '" << s << "'\n";
-			}
-			
 			if (s == "[BLANK_AUDIO]" || s == "[ Silence ]" || s == "[silence]" || s == "[ Silence]" ) {
 				continue;
 			}
 			// Skip strings that are just a single bracketed token
 			if (s.size() > 2 && s.front() == '[' && s.back() == ']') {
-				if (is_verbose()) {
-					std::cerr << "[whisper_backend DEBUG] Skipping bracketed token: '" << s << "'\n";
-				}
 				continue;
-			}
-			
-			if (is_verbose() && !s.empty()) {
-				std::cerr << "[whisper_backend DEBUG] Adding to output: '" << s << "'\n";
 			}
 			
 			out += s;
