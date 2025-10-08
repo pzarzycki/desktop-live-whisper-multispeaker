@@ -5,3 +5,19 @@ output/
 *.log
 debug_output.txt
 transcribe_file_debug.log
+
+# Large model files (download separately)
+models/*.bin
+models/*.onnx
+
+# Third-party binaries (large files)
+third_party/openblas/lib/*.a
+third_party/openblas/lib/*.lib
+third_party/onnxruntime/lib/*.pdb
+third_party/onnxruntime/lib/*.a
+
+# Python virtual environment
+.venv/
+__pycache__/
+*.pyc
+*.pyo
