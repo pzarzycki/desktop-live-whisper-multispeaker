@@ -1,12 +1,17 @@
 // Copyright (c) 2025 VAM Desktop Live Whisper
 // Main entry point for Dear ImGui application (Windows)
 
+#include <windows.h>
+#include <ShellScalingApi.h>
+#include <d3d11.h>
+#include <tchar.h>
+
 #include "app_window.hpp"
 #include "imgui.h"
 #include "imgui_impl_win32.h"
 #include "imgui_impl_dx11.h"
-#include <d3d11.h>
-#include <tchar.h>
+
+#pragma comment(lib, "Shcore.lib")
 
 // DirectX 11 data
 static ID3D11Device* g_pd3dDevice = nullptr;
@@ -24,6 +29,9 @@ LRESULT WINAPI WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
 // Main code
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow) {
+    // Enable DPI awareness for high-DPI displays
+    SetProcessDpiAwareness(PROCESS_PER_MONITOR_DPI_AWARE);
+    
     // Create application window
     WNDCLASSEXW wc = { 
         sizeof(wc), CS_CLASSDC, WndProc, 0L, 0L, 
@@ -57,8 +65,28 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     ImGuiIO& io = ImGui::GetIO(); (void)io;
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
 
+    // Get DPI scaling factor
+    UINT dpi = GetDpiForWindow(hwnd);
+    float dpi_scale = dpi / 96.0f;
+    
+    // Load Windows Segoe UI font (much better than bitmap default)
+    // Try to load system font, fallback to default if not found
+    ImFont* font = io.Fonts->AddFontFromFileTTF(
+        "C:\\Windows\\Fonts\\segoeui.ttf", 
+        16.0f * dpi_scale
+    );
+    
+    if (!font) {
+        // Fallback to default if Segoe UI not found
+        io.Fonts->AddFontDefault();
+    }
+
     // Setup Dear ImGui style (dark theme)
     ImGui::StyleColorsDark();
+    
+    // Scale UI elements for DPI
+    ImGuiStyle& style = ImGui::GetStyle();
+    style.ScaleAllSizes(dpi_scale);
 
     // Setup Platform/Renderer backends
     ImGui_ImplWin32_Init(hwnd);
@@ -196,6 +224,13 @@ LRESULT WINAPI WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             return 0;
         g_ResizeWidth = (UINT)LOWORD(lParam);
         g_ResizeHeight = (UINT)HIWORD(lParam);
+        return 0;
+    case WM_PAINT:
+        {
+            PAINTSTRUCT ps;
+            HDC hdc = BeginPaint(hWnd, &ps);
+            EndPaint(hWnd, &ps);
+        }
         return 0;
     case WM_SYSCOMMAND:
         if ((wParam & 0xfff0) == SC_KEYMENU) // Disable ALT application menu

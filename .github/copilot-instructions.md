@@ -5,8 +5,13 @@ There's a ready script to activate dev variables for currently installed VS Buil
 
 ## Git Commands
 
-Use git, but never **push** to remote server without User explicit consent.
+Never commit or push without User approval! Always test the solution before committing a new version. 
 ALWAYS TEST THE SOLUTION before commiting a new version. Especially before pushing anything up.
+
+
+## Multiplatform
+
+Remember this is a MULTIPLATFORM solution (MacOS / Windows) - dont leak windows headers into application. Only std and common libraries. If you need platfom-specific adaption, it must beisolated. Update cmake configs. We need two platforms: Windows and MacOS
 
 
 ## Project Documentation

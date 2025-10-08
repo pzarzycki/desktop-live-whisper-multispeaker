@@ -3,10 +3,14 @@
 
 #pragma once
 
-#include "app/transcription_controller.hpp"
+// #include "app/transcription_controller.hpp"  // TODO: Re-enable once controller is implemented
 #include <vector>
 #include <string>
 #include <memory>
+#include <cstdint>
+
+// Forward declaration for ImGui type
+struct ImVec4;
 
 class AppWindow {
 public:
@@ -45,8 +49,8 @@ private:
     int chunk_count_ = 0;
     int reclassification_count_ = 0;
 
-    // Controller
-    std::unique_ptr<TranscriptionController> controller_;
+    // Controller (disabled until implementation is complete)
+    // std::unique_ptr<app::TranscriptionController> controller_;
 
     // UI rendering functions
     void RenderMainWindow();
@@ -58,7 +62,7 @@ private:
     // Event handlers
     void OnStartStopClicked();
     void OnClearClicked();
-    void OnChunkReceived(const TranscriptionChunk& chunk);
+    void OnChunkReceived(const TranscriptChunk& chunk);
     void OnSpeakerReclassified(const std::vector<uint64_t>& chunk_ids, 
                                 int old_speaker, int new_speaker);
     void OnStatusChanged(int64_t elapsed, int chunks, int recls);

@@ -12,11 +12,13 @@ static const ImVec4 SPEAKER_1_COLOR = ImVec4(1.0f, 0.42f, 0.42f, 1.0f);  // #FF6
 static const ImVec4 SPEAKER_2_COLOR = ImVec4(0.31f, 0.80f, 0.77f, 1.0f); // #4ECDC4
 static const ImVec4 SPEAKER_3_COLOR = ImVec4(1.0f, 0.90f, 0.43f, 1.0f);  // #FFE66D
 
-AppWindow::AppWindow() 
-    : controller_(std::make_unique<TranscriptionController>()) {
+AppWindow::AppWindow() {
+    // TODO: Re-enable once controller is fully implemented
+    // controller_ = std::make_unique<app::TranscriptionController>();
     
     // Subscribe to controller events
-    controller_->subscribe_to_chunks([this](const TranscriptionChunk& chunk) {
+    /*
+    controller_->subscribe_to_chunks([this](const app::TranscriptionChunk& chunk) {
         TranscriptChunk ui_chunk;
         ui_chunk.id = chunk.id;
         ui_chunk.text = chunk.text;
@@ -27,23 +29,27 @@ AppWindow::AppWindow()
     });
 
     controller_->subscribe_to_reclassification(
-        [this](const SpeakerReclassification& recl) {
+        [this](const app::SpeakerReclassification& recl) {
             OnSpeakerReclassified(recl.chunk_ids, 
                                   recl.old_speaker_id, 
                                   recl.new_speaker_id);
         });
 
-    controller_->subscribe_to_status([this](const TranscriptionStatus& status) {
+    controller_->subscribe_to_status([this](const app::TranscriptionStatus& status) {
         OnStatusChanged(status.elapsed_ms, 
                         status.chunks_emitted, 
                         status.reclassifications_count);
     });
+    */
 }
 
 AppWindow::~AppWindow() {
+    // TODO: Re-enable once controller is fully implemented
+    /*
     if (is_recording_) {
         controller_->stop_transcription();
     }
+    */
 }
 
 void AppWindow::Render() {
@@ -51,11 +57,10 @@ void AppWindow::Render() {
 }
 
 void AppWindow::RenderMainWindow() {
-    // Configure window
+    // Configure window to fill the entire viewport
     ImGuiViewport* viewport = ImGui::GetMainViewport();
     ImGui::SetNextWindowPos(viewport->Pos);
     ImGui::SetNextWindowSize(viewport->Size);
-    ImGui::SetNextWindowViewport(viewport->ID);
     
     ImGuiWindowFlags window_flags = ImGuiWindowFlags_NoTitleBar | 
                                      ImGuiWindowFlags_NoCollapse |
@@ -184,12 +189,14 @@ void AppWindow::RenderStatusBar() {
 }
 
 void AppWindow::OnStartStopClicked() {
+    // TODO: Re-enable once controller is fully implemented
     if (is_recording_) {
-        controller_->stop_transcription();
+        // controller_->stop_transcription();
         is_recording_ = false;
         status_text_ = "Stopped";
     } else {
-        TranscriptionConfig config;
+        /*
+        app::TranscriptionConfig config;
         config.whisper_model = whisper_model_;
         config.max_speakers = max_speakers_;
         config.speaker_threshold = speaker_threshold_;
@@ -203,12 +210,16 @@ void AppWindow::OnStartStopClicked() {
         } else {
             status_text_ = "Failed to start recording";
         }
+        */
+        // For now, just toggle the UI state
+        is_recording_ = true;
+        status_text_ = "Recording... (controller not connected)";
     }
 }
 
 void AppWindow::OnClearClicked() {
     transcript_chunks_.clear();
-    controller_->clear_history();
+    // controller_->clear_history();
     chunk_count_ = 0;
     reclassification_count_ = 0;
     elapsed_ms_ = 0;

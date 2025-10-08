@@ -1,5 +1,9 @@
 build/
+build-*/
 output/
+
+# ImGui settings
+imgui.ini
 
 # Debug and log files
 *.log

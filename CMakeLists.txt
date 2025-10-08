@@ -68,21 +68,45 @@ if(BUILD_APP)
     target_include_directories(asr_whisper PUBLIC src)
     target_link_libraries(asr_whisper PUBLIC core_lib)
 
-    # GUI application with ImGui
-    add_executable(app_desktop_whisper WIN32
-        src/ui/main_imgui.cpp
-        src/ui/app_window.cpp
-    )
-    target_link_libraries(app_desktop_whisper PRIVATE
-        imgui
-        core_lib
-        audio_windows
-        asr_whisper
-        app_controller
-    )
-    
-    if(WIN32 AND MSVC)
-        target_link_libraries(app_desktop_whisper PRIVATE ole32 uuid)
+    # GUI application with ImGui - Platform-specific entry points
+    if(WIN32)
+        add_executable(app_desktop_whisper WIN32
+            src/ui/main_windows.cpp
+            src/ui/app_window.cpp
+        )
+        target_link_libraries(app_desktop_whisper PRIVATE
+            imgui
+            core_lib
+            ole32 
+            uuid 
+            Shcore
+            # TODO: Re-enable once controller is fully implemented
+            # audio_windows
+            # asr_whisper
+            # app_controller
+        )
+    elseif(APPLE)
+        add_executable(app_desktop_whisper MACOSX_BUNDLE
+            src/ui/main_macos.mm
+            src/ui/app_window.cpp
+        )
+        target_link_libraries(app_desktop_whisper PRIVATE
+            imgui
+            core_lib
+            "-framework Cocoa"
+            "-framework Metal"
+            "-framework MetalKit"
+            "-framework QuartzCore"
+            # TODO: Re-enable once controller is fully implemented
+            # audio_macos (to be created)
+            # asr_whisper
+            # app_controller
+        )
+        set_target_properties(app_desktop_whisper PROPERTIES
+            MACOSX_BUNDLE_BUNDLE_NAME "Desktop Live Whisper"
+            MACOSX_BUNDLE_GUI_IDENTIFIER "com.vam.desktoplivewhisper"
+            MACOSX_BUNDLE_SHORT_VERSION_STRING "1.0"
+        )
     endif()
 
     install(TARGETS app_desktop_whisper)
