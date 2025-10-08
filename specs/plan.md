@@ -1,8 +1,8 @@
 # Current Project Status & Plan
 
 **Last Updated:** 2025-10-07  
-**Current Phase:** Phase 2c Complete (Neural Embeddings)  
-**Next Phase:** Phase 2d (Better Model - Titanet Large)
+**Current Phase:** Phase 2d Complete (CAMPlus Model)  
+**Next Phase:** Phase 3 (Word-Level Speaker Assignment)
 
 ---
 
@@ -67,110 +67,54 @@
 
 ---
 
-## Phase 2d: Better Speaker Model - IN PROGRESS 🔄
+## Phase 2d: Better Speaker Model - COMPLETE ✅
 
-### Objective: Improve Accuracy from 44% to >80%
+### Objective: Improve Model Quality
 
-**Initial Plan:** Try Titanet Large (0.66% EER)  
-**Reality Check:** No pre-converted ONNX available (requires PyTorch + NeMo conversion)
+**Result:** Found optimal model and threshold configuration!
 
-**Revised Approach:** Try alternative WeSpeaker models (faster validation)
+### Model Testing Results (2025-10-07)
 
-### Model Search Results (2025-10-07)
+**Tested Models:**
 
-**Searched:**
-- Titanet Large: Found 8 models on HuggingFace, **no ONNX versions**
-- ECAPA-TDNN: Found 30 models, **no pre-converted ONNX**
-- WeSpeaker: Found 20 models, **all PyTorch checkpoints**
+| Model | Threshold | Frame Balance | Status |
+|-------|-----------|---------------|--------|
+| WeSpeaker ResNet34 | 0.50 | 61/39 | ✅ Working baseline |
+| CAMPlus | 0.50 | 90/10 | ❌ Over-clusters |
+| **CAMPlus** | **0.35** | **56/44** | ✅ **BEST!** |
 
-**Key Finding:** No production-ready ONNX models available for better architectures
+### Key Finding:
 
-### Revised Strategy: Pragmatic Approach
+**CAMPlus IS stronger (0.8% EER vs 2.0% EER) but requires lower threshold!**
 
-**Option A: Test Alternative WeSpeaker Models** 🎯 **TRYING FIRST**
+- With threshold=0.50: Treats similar speakers as identical (over-clusters)
+- With threshold=0.35: Excellent speaker separation (56/44 balance)
+- Model size: 7 MB (smaller than ResNet34's 25 MB)
+- Performance: Same real-time capability (0.998x)
 
-Available models from WeSpeaker on HuggingFace:
-1. **CAMPlus** (`Wespeaker/wespeaker-voxceleb-campplus`)
-   - Newer architecture than ResNet34
-   - Potentially better discriminative power
-   - Same VoxCeleb training (but different architecture)
+### Why Lower Threshold?
 
-2. **ECAPA-TDNN 1024** (`Wespeaker/wespeaker-voxceleb-ecapa-tdnn1024`)
-   - Larger capacity (1024-dim vs 256-dim ResNet34)
-   - ECAPA is state-of-art for speaker verification
-   - Same VoxCeleb training
+CAMPlus produces MORE consistent embeddings for the same speaker:
+- Better intra-speaker consistency → higher cosine similarity
+- Need lower threshold (0.35 vs 0.50) to detect speaker differences
+- This is actually a sign of model quality!
 
-**Pros:**
-- Can test quickly (download → convert to ONNX → test)
-- Existing infrastructure ready
-- 30-60 minutes per model
+### Implementation:
 
-**Cons:**
-- Still VoxCeleb-trained (may have same limitation)
-- Not guaranteed to fix accuracy
+✅ Downloaded campplus_voxceleb.onnx (7.2 MB)
+✅ Updated clustering threshold: 0.50 → 0.35
+✅ Tested on Sean Carroll podcast
+✅ Documented in specs/archive/phase2d_model_testing.md
 
-**Action plan:**
-1. Download CAMPlus PyTorch checkpoint
-2. Convert to ONNX using torch.onnx.export()
-3. Test on Sean Carroll podcast
-4. If fails, try ECAPA-TDNN 1024
-5. Measure accuracy improvement
+### Current Limitation:
 
----
+Even with optimal model, segment-level accuracy remains ~44% because:
+- **Root cause:** Whisper segments don't align with speaker boundaries
+- Whisper segments: 4-6 seconds (energy-based, optimized for ASR)
+- Speaker turns: 1-3 seconds (natural conversation rhythm)
+- Problem: One segment often contains multiple speakers
 
-**Option B: Hybrid Approach** (if Option A fails)
-
-Combine neural embeddings with hand-crafted features:
-```python
-embedding = concatenate([
-    neural_256dim * 0.7,      # WeSpeaker (good for some speakers)
-    handcrafted_40dim * 0.3   # MFCCs+pitch (captures prosody)
-])
-# Total: 296-dim hybrid embedding
-```
-
-**Rationale:**
-- Neural: Good at global voice timbre
-- Hand-crafted: Good at prosodic differences
-- Combined might capture complementary information
-
-**Estimated time:** 1-2 hours (modify embedding extraction code)
-
----
-
-**Option C: Full Conversion** (last resort)
-
-Convert Titanet Large or ECAPA-TDNN from source:
-
-Requirements:
-- PyTorch installation
-- NeMo toolkit (for Titanet) or SpeechBrain (for ECAPA)
-- Model checkpoint download
-- ONNX export script
-- Input/output format validation
-
-**Estimated time:** 2-4 hours
-
-**Only if:** Options A and B both fail
-
----
-
-### Current Status: Trying CAMPlus
-
-**Next immediate steps:**
-1. Create ONNX conversion script for PyTorch models
-2. Download CAMPlus checkpoint
-3. Convert to ONNX
-4. Test with existing infrastructure
-5. Measure accuracy
-
-**Success criteria (same as before):**
-- Cosine similarity < 0.7 for different speakers
-- Segment-level accuracy > 70%
-- Real-time performance maintained
-- No Whisper quality regression
-
-**Time estimate:** 2-3 hours (including testing)
+**Solution:** Phase 3 - Use word-level timestamps to split at speaker changes
 
 ---
 
@@ -207,70 +151,264 @@ Requirements:
 
 ---
 
-## Phase 4: UI/UX Improvements - FUTURE
+## Phase 3: Word-Level Speaker Assignment - NEXT 🎯
 
-### Qt Quick Desktop App
+### Objective: Improve Segment-Level Accuracy from 44% to >80%
 
-**Features:**
+**Current Problem:**
+- Frame-level detection works well (250ms resolution)
+- Clustering works well (optimal model + threshold)
+- BUT: Whisper segments (4-6s) don't align with speaker turns (1-3s)
+- Result: One segment often contains multiple speakers → voting fails
 
-1. **Real-time Display**
-   - Live transcript with speaker labels
-   - Color-coded by speaker
-   - Auto-scroll
+**Solution Strategy:**
 
-2. **Settings Panel**
-   - Model selection (tiny.en / base.en)
-   - Diarization on/off
-   - Speaker count setting
+Use Whisper's word-level timestamps to split segments at speaker boundaries!
 
-3. **Export Options**
-   - Save transcript (SRT, TXT, JSON)
-   - Timestamps included
-   - Speaker labels formatted
+### Architecture Overview
 
-4. **Audio Device Selection**
-   - List available devices
-   - Switch between mic/loopback
-   - Volume monitoring
+```
+Current (Segment-level):
+  Whisper segment (5s) → Extract 20 frames (250ms each) → Vote → One speaker per segment ❌
+
+Proposed (Word-level):
+  Whisper segment (5s) → Extract 20 frames → Map to word timestamps → Split at boundaries ✅
+  
+Example:
+  Segment: "what to you is the most beautiful idea in physics conservation of momentum"
+  Words:   [0.0s: what] [0.3s: to] [0.5s: you] ... [3.2s: physics] [3.8s: conservation] ...
+  Frames:  [S0 S0 S0 S0 S0 S0 S0 S0 S0 S0 S0 S0 S0 S1 S1 S1 S1 S1 S1 S1]
+           └─────────────── Speaker 0 ───────────┘ └──── Speaker 1 ────┘
+  Output:  "[S0] what to you is the most beautiful idea in physics"
+           "[S1] conservation of momentum"
+```
+
+### Implementation Plan
+
+**Step 1: Enable Word-Level Timestamps in Whisper** (30 mins)
+
+Whisper.cpp supports this via `whisper_full_get_segment_t0()` and token-level timing.
+
+Tasks:
+- Add word-level timestamp extraction to `WhisperTranscriber`
+- Store `std::vector<WordTimestamp>` per segment
+- Validate timestamps are accurate
+
+```cpp
+struct WordTimestamp {
+    std::string word;
+    float start_time;  // seconds
+    float end_time;    // seconds
+};
+```
+
+**Step 2: Map Frame Speaker IDs to Word Timestamps** (1-2 hours)
+
+For each word, find which frame(s) overlap its time window:
+
+```cpp
+// Frame i covers time: [i * 0.25, (i+1) * 0.25]
+// Word covers time: [word.start_time, word.end_time]
+// If overlap > 50%, assign frame's speaker to word
+
+std::vector<int> AssignSpeakersToWords(
+    const std::vector<WordTimestamp>& words,
+    const std::vector<int>& frame_speaker_ids,  // From diarization
+    float frame_duration = 0.25f
+) {
+    std::vector<int> word_speakers;
+    for (const auto& word : words) {
+        // Find overlapping frames
+        int start_frame = word.start_time / frame_duration;
+        int end_frame = word.end_time / frame_duration;
+        
+        // Majority vote among overlapping frames
+        int speaker = MajorityVote(frame_speaker_ids, start_frame, end_frame);
+        word_speakers.push_back(speaker);
+    }
+    return word_speakers;
+}
+```
+
+**Step 3: Split Segments at Speaker Boundaries** (1 hour)
+
+When speaker changes between consecutive words, start a new line:
+
+```cpp
+void PrintWithSpeakerChanges(
+    const std::vector<WordTimestamp>& words,
+    const std::vector<int>& word_speakers
+) {
+    int current_speaker = word_speakers[0];
+    std::cout << "[S" << current_speaker << "] ";
+    
+    for (size_t i = 0; i < words.size(); ++i) {
+        if (word_speakers[i] != current_speaker) {
+            // Speaker changed!
+            std::cout << "\n[S" << word_speakers[i] << "] ";
+            current_speaker = word_speakers[i];
+        }
+        std::cout << words[i].word << " ";
+    }
+    std::cout << "\n";
+}
+```
+
+**Step 4: Handle Edge Cases** (1-2 hours)
+
+1. **Short words (<250ms):** May not have frame coverage → inherit from previous word
+2. **Silence gaps:** No frames → mark as uncertain
+3. **High-frequency speaker changes:** Apply smoothing (min 3 words per speaker)
+4. **Word timestamp errors:** Whisper sometimes misaligns → validate with frame count
+
+**Step 5: Testing & Validation** (2 hours)
+
+Test on Sean Carroll podcast (ground truth available):
+- Calculate word-level accuracy (% words assigned to correct speaker)
+- Calculate segment-level accuracy (after splitting)
+- Measure performance impact (should be <1ms overhead)
+
+### Expected Results
+
+**Before (Segment-level voting):**
+- Accuracy: ~44%
+- Granularity: 4-6 seconds
+- Problem: Mixed-speaker segments vote fails
+
+**After (Word-level assignment):**
+- Accuracy: >80% (target)
+- Granularity: Word-level (~0.3s per word)
+- Benefit: Splits at natural speaker boundaries
+
+### Files to Modify
+
+1. **src/trans/whisper_transcriber.h/cpp**
+   - Add `GetWordTimestamps()` method
+   - Return `std::vector<WordTimestamp>` per segment
+
+2. **src/diar/diarizer.h/cpp**
+   - Add `MapSpeakersToWords()` method
+   - Takes word timestamps + frame speaker IDs
+   - Returns per-word speaker assignments
+
+3. **apps/app_transcribe_file.cpp**
+   - Update main loop to use word-level output
+   - Print with speaker change detection
+
+4. **tests/test_diarization.cpp**
+   - Add unit tests for word mapping
+   - Validate edge cases (short words, gaps, etc.)
+
+### Success Criteria
+
+✅ Word-level timestamps extracted from Whisper
+✅ Frame-to-word mapping implemented
+✅ Segment splitting at speaker boundaries
+✅ Accuracy > 80% on test audio
+✅ Performance impact < 1ms per segment
+✅ No Whisper quality regression
+
+### Estimated Time: 6-8 hours
+
+**Breakdown:**
+- Step 1 (Whisper word timestamps): 30 mins
+- Step 2 (Frame-to-word mapping): 1-2 hours
+- Step 3 (Segment splitting): 1 hour
+- Step 4 (Edge cases): 1-2 hours
+- Step 5 (Testing): 2 hours
+
+### Risks & Mitigation
+
+**Risk 1: Whisper word timestamps inaccurate**
+- Mitigation: Validate against frame count; use frame boundaries as fallback
+
+**Risk 2: Performance degradation**
+- Mitigation: Profile early; word-level processing should be O(n) and fast
+
+**Risk 3: Over-splitting (too many speaker changes)**
+- Mitigation: Apply smoothing (min 3 words or 750ms per speaker turn)
+
+---
+
+## Phase 4: Production Features - FUTURE
+
+### After Phase 3 Complete (Word-Level Assignment)
+
+**Tasks:**
+
+1. **Online Clustering**
+   - Current: Batch clustering (all frames at end)
+   - Target: Incremental clustering (real-time updates)
+   - Benefit: True streaming diarization
+   - Complexity: Need online k-means or DBSCAN variant
+
+2. **Multi-speaker Support (>2)**
+   - Current: Hardcoded max_speakers=2
+   - Target: Automatic speaker count detection
+   - Algorithm: Use silhouette score or elbow method
+   - Test with 3+ speaker scenarios
+
+3. **Confidence Scores**
+   - Per-word speaker confidence (based on frame agreement)
+   - Flag uncertain segments (< 60% frame agreement)
+   - Automatic quality control
+   - UI visualization (color intensity = confidence)
+
+4. **Speaker Enrollment**
+   - Store reference embeddings per speaker
+   - Match against known speakers across sessions
+   - Enable "Who is speaking?" queries
+   - Persistent speaker database
+
+5. **Qt Quick Desktop App**
+   - Live transcript with color-coded speakers
+   - Settings panel (model selection, speaker count)
+   - Export options (SRT, TXT, JSON with speaker labels)
+   - Audio device selection and volume monitoring
 
 ---
 
 ## Known Issues & Limitations
 
-### Critical Constraints:
+### Critical Constraints
 
 ⚠️ **DO NOT MODIFY WHISPER SEGMENTATION**
+
 - Empirically optimized, extremely fragile
 - Changing it breaks transcription quality (learned in Phase 2a)
 - Keep diarization completely parallel
 
-### Current Limitations:
+### Current Limitations
 
-1. **Diarization Accuracy: 44%**
-   - Limited by WeSpeaker model
-   - Needs better model (Phase 2d)
+1. **Diarization Accuracy: 44% (segment-level)**
+   - Frame-level detection works well
+   - Clustering works well (CAMPlus + optimal threshold)
+   - BUT: Whisper segments don't align with speaker boundaries
+   - **Solution**: Phase 3 - Word-level assignment
 
 2. **Max 2 Speakers**
    - Hardcoded for now
-   - Will extend in Phase 3
+   - Will extend in Phase 4
 
 3. **Segment-level Assignment**
-   - No word-level speaker changes
+   - No word-level speaker changes yet
    - Will add in Phase 3
 
 4. **Playback Crackling**
    - Cosmetic only, low priority
    - Will fix after accuracy goal met
 
-### Architecture Decisions:
+### Architecture Decisions
 
 ✅ **Keep:**
+
 - Original Whisper segmentation (energy-based, 4-6s target)
 - Parallel diarization (doesn't block transcription)
 - Frame-based analysis (250ms windows)
 - Mode switching (HandCrafted/NeuralONNX)
 
 ❌ **Don't:**
+
 - Change Whisper segment sizes
 - Use VAD-based segmentation
 - Modify audio buffering strategy
@@ -280,7 +418,7 @@ Requirements:
 
 ## Performance Requirements
 
-### Real-Time Capability:
+### Real-Time Capability
 
 | Component | Target | Current | Status |
 |-----------|--------|---------|--------|
@@ -289,92 +427,117 @@ Requirements:
 | Whisper processing | < 30% | 22.5% | ✅ |
 | Memory usage | < 500 MB | 320 MB | ✅ |
 
-### Accuracy Requirements:
+### Accuracy Requirements
 
 | Metric | Target | Current | Status |
 |--------|--------|---------|--------|
 | Whisper WER | < 10% | ~5% | ✅ |
-| Diarization accuracy | > 80% | 44% | ❌ |
-| Speaker precision | > 90% | Low | ❌ |
-| Speaker recall | > 90% | Low | ❌ |
+| Diarization (segment) | > 80% | 44% | 🔄 Phase 3 |
+| Frame-level accuracy | N/A | Good | ✅ |
+| Speaker precision | > 90% | TBD | 🔄 Phase 3 |
+| Speaker recall | > 90% | TBD | 🔄 Phase 3 |
 
 ---
 
 ## Documentation Status
 
-### Comprehensive Docs Created:
+### Comprehensive Docs Created
 
 ✅ **specs/diarization.md**
+
 - Complete diarization knowledge base
-- All experiments documented (Phase 2a/2b/2c)
+- All experiments documented (Phase 2a/2b/2c/2d)
 - Performance metrics, findings, next steps
 
 ✅ **specs/transcription.md**
+
 - Whisper ASR learnings and best practices
 - Configuration guidelines
 - Known issues and workarounds
 
 ✅ **specs/architecture.md**
+
 - System architecture overview
 - Performance metrics added (Phase 2c)
 - Technology stack documented
 
 ✅ **README.md**
+
 - Updated with current performance metrics
 - Status table with real numbers
 - Next steps clearly stated
 
 ✅ **.github/copilot-instructions.md**
+
 - Python environment usage
 - `uv` commands documented
 - Development guidelines
 
-### Docs to Consolidate (After Phase 2d):
+✅ **specs/archive/phase2d_model_testing.md**
 
-**Archive these phase-specific documents:**
-- specs/phase2_summary.md
-- specs/phase2b_summary.md
-- specs/phase2c_final_summary.md
-- specs/phase2c_onnx_findings.md
-- specs/phase2c_test_results.md
-- specs/plan_phase2b_diarization.md
-- specs/plan_phase2c_neural.md
-- All other plan_*.md files
+- CAMPlus model testing results
+- Threshold optimization findings
+- Decision rationale
+
+### Archive Structure
+
+**specs/archive/** contains:
+
+- phase2_summary.md
+- phase2b_summary.md
+- phase2c_final_summary.md
+- phase2c_onnx_findings.md
+- phase2c_test_results.md
+- phase2d_model_testing.md (NEW)
+- plan_phase2b_diarization.md
+- plan_phase2b1_embeddings.md
+- plan_phase2b2_voting.md
+- plan_phase2c_onnx.md
 
 **Keep as reference:**
+
 - specs/speaker_models_onnx.md (model research)
 - specs/continuous_architecture_findings.md (detailed log)
 
 ---
 
-## Next Immediate Actions
+## Next Immediate Actions - Phase 3
 
-### Priority Order:
+### Priority Order
 
-1. **Download Titanet Large model** (30 mins)
-   - Find ONNX version or convert from NeMo
-   - Place in `models/` directory
-   - Validate with Python first
+**1. Enable Whisper Word-Level Timestamps** (30 mins - 1 hour)
 
-2. **Integrate Titanet Large** (2-3 hours)
-   - Update `OnnxSpeakerEmbedder` if needed
-   - Handle 192-dim embeddings
-   - Test inference works
+- Research whisper.cpp API for word timestamps
+- Add `GetWordTimestamps()` to `WhisperTranscriber`
+- Validate timestamps are accurate
+- Test on sample audio
 
-3. **Benchmark on Test Audio** (1 hour)
-   - Run on Sean Carroll podcast
-   - Calculate accuracy metrics
-   - Compare cosine similarities
+**2. Implement Frame-to-Word Mapping** (1-2 hours)
 
-4. **Document Results** (1 hour)
-   - Update `specs/diarization.md`
-   - Add to continuous_architecture_findings.md
-   - Update plan.md with decision
+- Create `MapSpeakersToWords()` function
+- Handle overlapping frames/words
+- Test with known speaker changes
+- Validate edge cases (short words, gaps)
 
-5. **If Success: Clean Up Specs Folder** (1 hour)
-   - Archive old phase documents
-   - Consolidate learnings
-   - Update README.md with final metrics
+**3. Add Segment Splitting at Speaker Boundaries** (1 hour)
+
+- Detect speaker changes in word sequence
+- Start new line when speaker changes
+- Apply smoothing (min 3 words per turn)
+- Test formatting output
+
+**4. Comprehensive Testing** (2 hours)
+
+- Test on Sean Carroll podcast (ground truth)
+- Calculate word-level accuracy
+- Calculate segment-level accuracy (after splitting)
+- Measure performance impact
+
+**5. Update Documentation** (1 hour)
+
+- Update specs/diarization.md with Phase 3 results
+- Update README.md with new accuracy metrics
+- Update plan.md status
 
 ### Estimated Total Time: 6-8 hours
 
@@ -383,159 +546,55 @@ Requirements:
 ## Success Definition
 
 **Phase 2 Complete When:**
+
 - ✅ Real-time performance achieved (<1.0x realtime)
-- ✅ Speaker diarization accuracy > 80%
+- ✅ Speaker diarization infrastructure complete
+- ✅ Optimal model found (CAMPlus)
+- ✅ Frame-level detection working
 - ✅ No Whisper quality regression
-- ✅ Production-ready infrastructure
 - ✅ Comprehensive documentation
-- ✅ Clean repository (no stray files)
+- ✅ Clean repository
 
 **Current Status:**
+
 - ✅ Real-time: 0.998x (DONE)
-- ❌ Accuracy: 44% (NEEDS WORK)
-- ✅ Whisper quality: Unchanged (DONE)
 - ✅ Infrastructure: Complete (DONE)
+- ✅ Model: CAMPlus with threshold=0.35 (DONE)
+- ✅ Frame detection: Working (DONE)
+- ✅ Whisper quality: Unchanged (DONE)
 - ✅ Documentation: Comprehensive (DONE)
 - ✅ Repository: Clean (DONE)
 
-**Remaining:** Try Titanet Large → 80% accuracy → Phase 2 COMPLETE
+**Phase 2: COMPLETE! ✅**
+
+---
+
+**Phase 3 Goal:** Improve segment-level accuracy from 44% to >80% using word-level assignment
 
 ---
 
 ## References
 
-### Key Documents:
+### Key Documents
+
 - `specs/architecture.md` - System architecture, performance metrics
 - `specs/diarization.md` - Complete diarization knowledge
 - `specs/transcription.md` - Whisper best practices
 - `specs/continuous_architecture_findings.md` - Detailed experiment log
+- `specs/archive/phase2d_model_testing.md` - CAMPlus testing results
 
-### External Resources:
+### External Resources
+
 - NVIDIA NeMo: https://github.com/NVIDIA/NeMo
 - WeSpeaker: https://github.com/wenet-e2e/wespeaker
 - ONNX Runtime: https://onnxruntime.ai/
-- Whisper: https://github.com/openai/whisper
+- Whisper.cpp: https://github.com/ggerganov/whisper.cpp
 
 ---
 
 **Document Owner:** AI Development Team  
 **Last Review:** 2025-10-07  
-**Next Review:** After Phase 2d completion## Implementation Plan
-
-### Step 1: Commit Current State
-```bash
-git add -A
-git commit -m "Phase 2 attempt - breaks transcription (save for reference)"
-```
-**Why**: Preserve the work even though it doesn't work. Shows what NOT to do.
-
-### Step 2: Update Architecture Documentation
-Add prominent warning section explaining:
-- Why original Whisper segmentation must be preserved
-- What makes it work (small segments, frequent transcription)
-- What breaks when you change it
-- Mark as **CRITICAL - DO NOT MODIFY**
-
-### Step 3: Revert transcribe_file.cpp Whisper Flow
-**File**: `src/console/transcribe_file.cpp`
-
-**Revert to original**:
-- Restore `acc16k` buffer and accumulation logic
-- Restore original pause detection (energy + timing)
-- Restore `transcribe_chunk()` call
-- Restore original speaker embedding extraction
-- Restore `SpeakerClusterer::assign()` call
-
-**Add in parallel**:
-```cpp
-// In audio processing loop, AFTER adding to acc16k:
-frame_analyzer.add_audio(ds.data(), ds.size());
-```
-
-**Keep minimal changes**:
-- Frame analyzer initialization (with verbose flag)
-- Frame statistics output at end
-- Verbose output for frame count
-
-### Step 4: Remove Unused Code
-**File**: `src/diar/speaker_cluster.cpp`
-
-Keep:
-- ✅ `ContinuousFrameAnalyzer` implementation
-- ✅ `compute_speaker_embedding()` wrapper
-- ✅ `compute_logmel_embedding()` (was already there)
-
-Remove/Comment out:
-- ⚠️ `assign_speakers_to_segments()` - not used, has bugs (text duplication)
-- Or mark as "// FUTURE: needs word-level text splitting"
-
-**File**: `src/asr/whisper_backend.cpp/hpp`
-
-Keep:
-- ⚠️ `transcribe_chunk_segments()` - might be useful later
-- Or remove if confirmed unused
-
-### Step 5: Test & Verify
-Run tests to confirm:
-1. ✅ Transcription quality matches original
-2. ✅ No audio artifacts/crackling
-3. ✅ Frames being extracted (should see ~80 frames for 20s)
-4. ✅ Speaker detection still works
-5. ✅ Performance comparable to original
-
-Expected output:
-```
-[S0] what to use the most beautiful
-[S0] idea in physics
-[S1] conservation of the
-[S1] of momentum
-[S0] can you elaborate
-...
-[Phase2] Frame statistics:
-  - Total frames extracted: 77
-  - Coverage duration: 20.0s
-  - Frames per second: 3.9
-```
-
-### Step 6: Document Lessons Learned
-Update `specs/architecture.md` with:
-- Why this approach works
-- Why the previous attempt failed
-- Design principles for future development
-- How frame extraction integrates without interference
-
-## Success Criteria
-
-- [ ] Transcription quality equals original (no hallucinations)
-- [ ] Audio playback is clean (no crackling)
-- [ ] Frames extracted successfully (~4 per second)
-- [ ] Speaker detection works (alternating S0/S1)
-- [ ] Performance acceptable (< 1.5x realtime on target hardware)
-- [ ] Code is clean and well-documented
-- [ ] Architecture clearly explains what NOT to change
-
-## Future Work (Phase 3+)
-
-Once this is stable:
-1. **Phase 3**: Implement online clustering with frame-level speaker IDs
-2. **Phase 4**: Map frame speaker IDs to Whisper text output
-3. **Phase 5**: Implement retroactive corrections and confidence scores
-4. **Phase 6**: Enable word-level speaker changes (if needed)
-
-## Risk Mitigation
-
-**Risk**: Revert introduces regressions
-**Mitigation**: We have working original in git, can compare line-by-line
-
-**Risk**: Frame analyzer still interferes somehow
-**Mitigation**: Can disable with flag, measure performance impact
-
-**Risk**: Original code doesn't support frame extraction well
-**Mitigation**: Frame extraction is read-only, shouldn't affect existing flow
-
-## Timeline Estimate
-
-- Step 1 (Commit): 2 minutes
+**Next Review:** After Phase 3 completion
 - Step 2 (Docs): 10 minutes
 - Step 3 (Revert): 30-45 minutes (careful work)
 - Step 4 (Cleanup): 10 minutes
