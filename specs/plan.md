@@ -1,8 +1,8 @@
 # Current Project Status & Plan
 
 **Last Updated:** 2025-10-07  
-**Current Phase:** Phase 2d Complete (CAMPlus Model)  
-**Next Phase:** Phase 3 (Word-Level Speaker Assignment)
+**Current Phase:** Phase 3 Steps 1-2 Complete (Word-Level Speaker Assignment)  
+**Next:** Debug clustering sensitivity, integrate into main app
 
 ---
 
@@ -118,7 +118,48 @@ Even with optimal model, segment-level accuracy remains ~44% because:
 
 ---
 
-## Phase 3: Production Deployment - FUTURE
+## Phase 3: Word-Level Speaker Assignment - IN PROGRESS ⚡
+
+### Step 1: Word-Level Timestamps ✅ COMPLETE (2025-10-07)
+
+**Implementation:**
+- Created WhisperWord & WhisperSegmentWithWords structures  
+- Implemented transcribe_chunk_with_words() with character-proportional estimation
+- Whisper.cpp token_timestamps breaks quality → used proportional distribution instead
+- Test app: `test_word_timestamps.cpp` validates extraction on 16kHz audio
+
+### Step 2: Frame-to-Word Mapping ✅ COMPLETE (2025-10-07)
+
+**Implementation:**
+- map_words_to_speakers(): Frame overlap voting for each word
+- print_with_speaker_changes(): Output with [S0]/[S1] labels
+- Test app: `test_word_speaker_mapping.cpp` shows full pipeline
+
+**Critical Fixes:**
+- ✅ Download scripts now get ALL models by default
+- ✅ Fixed CAMPlus URL (voxceleb_CAM%2B%2B.onnx encoding)
+- ✅ CAMPlus now default (28 MB, threshold=0.35)
+- ✅ Updated src/diar/speaker_cluster.hpp default model
+- ✅ Updated transcribe_file.cpp threshold: 0.50 → 0.35
+
+**Known Issue - Clustering Sensitivity:**
+Clustering finds only 1 speaker on 10s test clip:
+- threshold=0.35: 1 speaker (100% S0) ❌
+- threshold=0.20: 1 speaker (100% S0) ❌
+
+Possible causes: 10s clip may be single speaker, or embeddings too similar.  
+Next: Test with full 30s audio (Phase 2d showed 56/44 balance).
+
+### Step 3: Integrate into Main App - TODO
+
+- Replace segment-level with word-level assignment
+- Apply smoothing (min 3 words or 750ms per turn)
+- Test accuracy against ground truth
+- Target: >80% (up from 44% segment-level)
+
+---
+
+## Phase 3+: Production Deployment - FUTURE
 
 ### After Accuracy Goal Met (>80%)
 
