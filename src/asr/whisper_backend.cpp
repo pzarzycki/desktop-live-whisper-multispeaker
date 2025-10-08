@@ -332,6 +332,182 @@ std::vector<WhisperSegment> WhisperBackend::transcribe_chunk_segments(const int1
 #endif
 }
 
+std::vector<WhisperSegmentWithWords> WhisperBackend::transcribe_chunk_with_words(const int16_t* data, size_t samples) {
+	std::vector<WhisperSegmentWithWords> segments;
+	if (!data || samples == 0) return segments;
+#if defined(WHISPER_BACKEND_AVAILABLE)
+	if (!g_ws.ctx) return segments;
+	
+	// Configure parameters with token timestamps enabled
+	whisper_full_params wparams = whisper_full_default_params(WHISPER_SAMPLING_GREEDY);
+	wparams.print_realtime   = false;
+	wparams.print_progress   = false;
+	wparams.print_timestamps = is_verbose();
+	wparams.print_special    = false;
+	wparams.translate        = false;
+	wparams.language         = "en";
+	wparams.detect_language  = false;
+	wparams.n_threads        = (g_ws.n_threads == 0) ? std::max(1u, std::thread::hardware_concurrency()) : g_ws.n_threads;
+	wparams.offset_ms        = 0;
+	wparams.duration_ms      = 0;
+	wparams.token_timestamps = true;  // ENABLE TOKEN TIMESTAMPS
+	wparams.max_len          = 0;
+	wparams.split_on_word    = false;
+	wparams.audio_ctx        = 0;
+	wparams.greedy.best_of   = 1;
+	
+	std::vector<float> pcm_f32;
+	pcm_f32.reserve(samples);
+	constexpr float scale = 1.0f / 32768.0f;
+	for (size_t i = 0; i < samples; ++i) {
+		pcm_f32.push_back(static_cast<float>(data[i]) * scale);
+	}
+	
+	int ret = 0;
+	if (g_ws.state) {
+		ret = whisper_full_with_state(g_ws.ctx, g_ws.state, wparams, pcm_f32.data(), (int)pcm_f32.size());
+	} else {
+		ret = whisper_full(g_ws.ctx, wparams, pcm_f32.data(), (int)pcm_f32.size());
+	}
+	if (ret != 0) {
+		std::cerr << "[whisper] whisper_full FAILED, ret=" << ret << "\n";
+		return segments;
+	}
+	
+	int n_segments = 0;
+	if (g_ws.state) {
+		n_segments = whisper_full_n_segments_from_state(g_ws.state);
+	} else {
+		n_segments = whisper_full_n_segments(g_ws.ctx);
+	}
+	
+	for (int i = 0; i < n_segments; ++i) {
+		const char* txt = nullptr;
+		int64_t t0 = 0, t1 = 0;
+		
+		if (g_ws.state) {
+			txt = whisper_full_get_segment_text_from_state(g_ws.state, i);
+			t0 = whisper_full_get_segment_t0_from_state(g_ws.state, i);
+			t1 = whisper_full_get_segment_t1_from_state(g_ws.state, i);
+		} else {
+			txt = whisper_full_get_segment_text(g_ws.ctx, i);
+			t0 = whisper_full_get_segment_t0(g_ws.ctx, i);
+			t1 = whisper_full_get_segment_t1(g_ws.ctx, i);
+		}
+		
+		if (!txt) continue;
+		
+		std::string seg_text(txt);
+		// Trim whitespace
+		auto trim = [](std::string& x){
+			size_t a = x.find_first_not_of(" \t\r\n");
+			size_t b = x.find_last_not_of(" \t\r\n");
+			if (a == std::string::npos) { x.clear(); return; }
+			x = x.substr(a, b - a + 1);
+		};
+		trim(seg_text);
+		
+		// Filter silence markers
+		if (seg_text == "[BLANK_AUDIO]" || seg_text == "[ Silence ]" || 
+		    seg_text == "[silence]" || seg_text == "[ Silence]") {
+			continue;
+		}
+		if (seg_text.empty()) continue;
+		
+		// Get token count for this segment
+		int n_tokens = 0;
+		if (g_ws.state) {
+			n_tokens = whisper_full_n_tokens_from_state(g_ws.state, i);
+		} else {
+			n_tokens = whisper_full_n_tokens(g_ws.ctx, i);
+		}
+		
+		// Extract word-level timestamps from tokens
+		std::vector<WhisperWord> words;
+		std::string current_word;
+		int64_t word_start = -1;
+		int64_t word_end = -1;
+		float word_prob = 0.0f;
+		int word_token_count = 0;
+		
+		for (int j = 0; j < n_tokens; ++j) {
+			whisper_token_data token_data;
+			if (g_ws.state) {
+				token_data = whisper_full_get_token_data_from_state(g_ws.state, i, j);
+			} else {
+				token_data = whisper_full_get_token_data(g_ws.ctx, i, j);
+			}
+			
+			const char* token_text = nullptr;
+			if (g_ws.state) {
+				token_text = whisper_full_get_token_text_from_state(g_ws.ctx, g_ws.state, i, j);
+			} else {
+				token_text = whisper_full_get_token_text(g_ws.ctx, i, j);
+			}
+			
+			if (!token_text) continue;
+			std::string tok(token_text);
+			
+			// Skip special tokens (timestamps, etc.)
+			if (tok.empty() || tok[0] == '<' || tok[0] == '[') continue;
+			
+			// Check if this is a word boundary (starts with space or is first token)
+			bool is_word_start = (j == 0) || (tok[0] == ' ');
+			
+			if (is_word_start && !current_word.empty()) {
+				// Save previous word
+				trim(current_word);
+				if (!current_word.empty() && word_start >= 0) {
+					WhisperWord w;
+					w.word = current_word;
+					w.t0_ms = word_start * 10;  // Convert from centiseconds
+					w.t1_ms = word_end * 10;
+					w.probability = (word_token_count > 0) ? (word_prob / word_token_count) : 0.0f;
+					words.push_back(w);
+				}
+				// Start new word
+				current_word = tok;
+				word_start = token_data.t0;
+				word_end = token_data.t1;
+				word_prob = token_data.p;
+				word_token_count = 1;
+			} else {
+				// Continue current word
+				current_word += tok;
+				if (word_start < 0) word_start = token_data.t0;
+				word_end = token_data.t1;
+				word_prob += token_data.p;
+				word_token_count++;
+			}
+		}
+		
+		// Save last word
+		trim(current_word);
+		if (!current_word.empty() && word_start >= 0) {
+			WhisperWord w;
+			w.word = current_word;
+			w.t0_ms = word_start * 10;
+			w.t1_ms = word_end * 10;
+			w.probability = (word_token_count > 0) ? (word_prob / word_token_count) : 0.0f;
+			words.push_back(w);
+		}
+		
+		// Create segment with words
+		WhisperSegmentWithWords seg;
+		seg.text = seg_text;
+		seg.t0_ms = t0 * 10;
+		seg.t1_ms = t1 * 10;
+		seg.words = std::move(words);
+		segments.push_back(seg);
+	}
+	
+	return segments;
+#else
+	std::cerr << "[whisper] backend not available; returning no segments.\n";
+	return std::vector<WhisperSegmentWithWords>();
+#endif
+}
+
 void WhisperBackend::set_threads(int n) {
 #if defined(WHISPER_BACKEND_AVAILABLE)
 	if (n <= 0) {

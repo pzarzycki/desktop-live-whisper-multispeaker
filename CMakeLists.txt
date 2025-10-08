@@ -160,6 +160,15 @@ if(NOT BUILD_APP)
     target_compile_features(app_transcribe_file PRIVATE cxx_std_20)
     target_include_directories(app_transcribe_file PRIVATE src)
     target_link_libraries(app_transcribe_file PRIVATE asr_whisper audio_windows diarization)
+
+    # Test application for word-level timestamps
+    add_executable(test_word_timestamps
+        apps/test_word_timestamps.cpp
+        src/audio/file_capture.cpp
+    )
+    target_compile_features(test_word_timestamps PRIVATE cxx_std_20)
+    target_include_directories(test_word_timestamps PRIVATE src)
+    target_link_libraries(test_word_timestamps PRIVATE asr_whisper audio_windows)
 endif()
 
 

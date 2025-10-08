@@ -3,6 +3,9 @@
 
 There's a ready script to activate dev variables for currently installed VS Build Tools: `${workspace}\Enter-VSDev.ps1`. Just run it once in the new PowerShell session, if needed.
 
+## Git Commands
+
+Use git, but never **push** to remote server without User explicit consent.
 
 ## Project Documentation
 
