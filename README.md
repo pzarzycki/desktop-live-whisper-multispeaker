@@ -1,11 +1,22 @@
 # Desktop Live Whisper (multiplatform) — Windows-first
 
-Minimal Qt Quick desktop app scaffold for live transcription with Whisper and local diarization. This repo is currently in TDD bring-up: failing integration tests are present and the core implementation will follow.
+Real-time transcription with speaker diarization using Whisper and CAMPlus embeddings.
+
+## 🚀 **NEXT AGENT: START HERE!** 👉 [`NEXT_AGENT_START_HERE.md`](NEXT_AGENT_START_HERE.md)
+
+**Mission:** Wire up Application API to transcription engine (12-18 hours)
+
+---
 
 ## Current Status
 
+**Phase 3:** ✅ COMPLETE - Speaker diarization (frame voting, 75% accuracy)  
+**Phase 4:** ⏳ IN PROGRESS - Application API (skeleton complete, needs wiring)  
+**Phase 5:** 🔜 NEXT - GUI development
+
 **Transcription:** ✅ Production-ready (Whisper tiny.en)  
-**Speaker Diarization:** ⚠️ Technical implementation complete, accuracy needs improvement  
+**Speaker Diarization:** ✅ Frame voting approach (75% on hardest case)  
+**Application API:** ✅ Design complete, skeleton working  
 **Performance:** ✅ Real-time capable (0.998x realtime factor)
 
 ### Performance Metrics
