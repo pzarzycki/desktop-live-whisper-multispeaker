@@ -299,6 +299,19 @@ int main(int argc, char** argv) {
             std::cerr << "[save] recording mic to: " << save_mic_wav << "\n";
         }
     }
+    
+    // Save resampled audio (what Whisper actually sees) for debugging
+    WavWriter wavResampledOut;
+    bool recordResampled = useFile; // Always save for file input to debug crackling
+    if (recordResampled) {
+        std::string resampled_path = "output/whisper_input_16k.wav";
+        if (!wavResampledOut.open(resampled_path, 16000)) {
+            std::cerr << "[save] failed to open resampled WAV: " << resampled_path << "\n";
+            recordResampled = false;
+        } else {
+            std::cerr << "[save] recording resampled audio (Whisper input) to: " << resampled_path << "\n";
+        }
+    }
 
     // Thread-safe queue for audio chunks
     // Large buffer (50 chunks ≈ 1 second) allows processing to catch up during slow periods
@@ -343,6 +356,8 @@ int main(int argc, char** argv) {
             frame_config.window_ms = 1000;  // 1s window for each embedding
             frame_config.history_sec = 60;  // Keep last 60s
             frame_config.verbose = verbose;
+            // Using neural embeddings by default (WeSpeaker ResNet34)
+            frame_config.embedding_mode = diar::EmbeddingMode::NeuralONNX;
             diar::ContinuousFrameAnalyzer frame_analyzer(target_hz, frame_config);
             
             if (verbose) {
@@ -361,6 +376,11 @@ int main(int argc, char** argv) {
                 auto ds = resample_to_16k(chunk.samples, chunk.sample_rate);
                 auto t_res1 = std::chrono::steady_clock::now();
                 perf.add_resample(std::chrono::duration<double>(t_res1 - t_res0).count());
+                
+                // Save resampled audio for debugging
+                if (recordResampled && wavResampledOut.out) {
+                    wavResampledOut.write(ds.data(), ds.size());
+                }
                 
                 // Original: Accumulate in acc16k
                 acc16k.insert(acc16k.end(), ds.begin(), ds.end());
@@ -679,6 +699,10 @@ int main(int argc, char** argv) {
     }
     
     if (recordMic && wavOut.out) wavOut.close();
+    if (recordResampled && wavResampledOut.out) {
+        wavResampledOut.close();
+        std::cerr << "[save] resampled audio saved to: output/whisper_input_16k.wav\n";
+    }
     if (!useFile) micCap.stop(); else fileCap.stop();
     if (useFile && play_file) speaker.stop();
     if (verbose) std::cerr << "\n";

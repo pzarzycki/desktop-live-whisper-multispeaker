@@ -1,4 +1,5 @@
 #include "diar/onnx_embedder.hpp"
+#include "diar/mel_features.hpp"
 #include <onnxruntime_cxx_api.h>
 #include <cmath>
 #include <algorithm>
@@ -57,17 +58,21 @@ OnnxSpeakerEmbedder::OnnxSpeakerEmbedder(const Config& config)
         // Get input name
         if (num_inputs > 0) {
             Ort::AllocatedStringPtr input_name_ptr = m_session->GetInputNameAllocated(0, *m_allocator);
-            m_input_names.push_back(input_name_ptr.get());
+            std::string input_name(input_name_ptr.get());
+            m_input_name_strings.push_back(input_name);
+            m_input_names.push_back(m_input_name_strings.back().c_str());
             
             if (m_config.verbose) {
-                fprintf(stderr, "[OnnxEmbedder] Input name: %s\n", input_name_ptr.get());
+                fprintf(stderr, "[OnnxEmbedder] Input name: %s\n", input_name.c_str());
             }
         }
         
         // Get output name and dimension
         if (num_outputs > 0) {
             Ort::AllocatedStringPtr output_name_ptr = m_session->GetOutputNameAllocated(0, *m_allocator);
-            m_output_names.push_back(output_name_ptr.get());
+            std::string output_name(output_name_ptr.get());
+            m_output_name_strings.push_back(output_name);
+            m_output_names.push_back(m_output_name_strings.back().c_str());
             
             // Get output shape to determine embedding dimension
             Ort::TypeInfo type_info = m_session->GetOutputTypeInfo(0);
@@ -80,7 +85,7 @@ OnnxSpeakerEmbedder::OnnxSpeakerEmbedder(const Config& config)
             
             if (m_config.verbose) {
                 fprintf(stderr, "[OnnxEmbedder] Output name: %s, embedding_dim: %d\n", 
-                        output_name_ptr.get(), m_embedding_dim);
+                        output_name.c_str(), m_embedding_dim);
             }
         }
         
@@ -89,8 +94,17 @@ OnnxSpeakerEmbedder::OnnxSpeakerEmbedder(const Config& config)
             Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault)
         );
         
+        // Initialize mel feature extractor for Fbank-based models
+        MelFeatureExtractor::Config mel_config;
+        mel_config.sample_rate = m_config.sample_rate;
+        mel_config.n_fft = 400;         // 25ms at 16kHz
+        mel_config.hop_length = 160;    // 10ms at 16kHz
+        mel_config.n_mels = 80;         // WeSpeaker expects 80-dim Fbank
+        mel_config.fmax = m_config.sample_rate / 2.0f;  // Nyquist frequency
+        m_mel_extractor = std::make_unique<MelFeatureExtractor>(mel_config);
+        
         if (m_config.verbose) {
-            fprintf(stderr, "[OnnxEmbedder] Initialization complete\n");
+            fprintf(stderr, "[OnnxEmbedder] Initialization complete (with Fbank extraction)\n");
         }
         
     } catch (const Ort::Exception& e) {
@@ -136,15 +150,29 @@ std::vector<float> OnnxSpeakerEmbedder::compute_embedding(const int16_t* pcm16, 
     }
     
     try {
-        // Preprocess audio
-        std::vector<float> audio_data = preprocess_audio(pcm16, samples);
+        // Preprocess audio: convert int16 to float32
+        std::vector<float> audio_float = preprocess_audio(pcm16, samples);
         
-        // Create input tensor
-        std::vector<int64_t> input_shape = {1, static_cast<int64_t>(audio_data.size())};
+        // Extract mel filterbank features (80-dim Fbank)
+        std::vector<float> mel_features = m_mel_extractor->extract_features(
+            audio_float.data(), 
+            static_cast<int>(audio_float.size())
+        );
+        
+        // Get number of time frames
+        int n_frames = m_mel_extractor->get_num_frames(static_cast<int>(audio_float.size()));
+        
+        if (n_frames <= 0) {
+            fprintf(stderr, "[OnnxEmbedder] Warning: No frames extracted from audio\n");
+            return std::vector<float>(m_embedding_dim, 0.0f);
+        }
+        
+        // Create input tensor: [batch=1, time_frames, n_mels=80]
+        std::vector<int64_t> input_shape = {1, static_cast<int64_t>(n_frames), 80};
         Ort::Value input_tensor = Ort::Value::CreateTensor<float>(
             *m_memory_info,
-            audio_data.data(),
-            audio_data.size(),
+            mel_features.data(),
+            mel_features.size(),
             input_shape.data(),
             input_shape.size()
         );

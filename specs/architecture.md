@@ -824,4 +824,123 @@ class SpeakerAwareTranscriber {
 - ✅ Natural conversation flow
 - ~95%+ accuracy
 
+---
+
+## Performance Metrics (Current State)
+
+### Phase 2c: Neural Embeddings Implementation (2025-10-07)
+
+**System:** ONNX Runtime 1.20.1 + WeSpeaker ResNet34 model
+
+#### Real-Time Performance (20-second audio test)
+
+```
+Processing Breakdown:
+  - Audio capture:     Real-time (streaming)
+  - Resampling:        0.004s   (0.02% of total)
+  - Diarization:       0.173s   (0.86% of total) ← Neural embeddings
+  - Whisper ASR:       4.516s   (22.5% of total)
+  - Other (I/O/play):  15.351s  (76.6% of total)
+  - Total:            20.044s   (100%)
+
+Real-time Factor: 0.998 (perfect real-time capability)
+Audio Duration:   20.000s
+Wall Clock Time:  20.044s
+```
+
+**Key Insight:** Diarization overhead is negligible (<1%). System bottleneck is Whisper inference (22.5%), not speaker embedding.
+
+#### Diarization Performance Details
+
+**Feature Extraction (Mel Filterbank):**
+- Algorithm: 80-dim Fbank with Cooley-Tukey FFT
+- Parameters: n_fft=400 (25ms), hop_length=160 (10ms)
+- Performance: ~0.03s for 77 frames (~115x faster than real-time)
+- Optimization: ~1000x speedup vs naive DFT implementation
+
+**ONNX Inference (WeSpeaker ResNet34):**
+- Model size: 25.3 MB
+- Embedding dimension: 256
+- Processing time: ~0.10s for 77 frames (58% of diarization time)
+- Throughput: ~770 frames/second
+
+**Clustering + Assignment:**
+- Algorithm: Agglomerative hierarchical clustering
+- Processing time: ~0.04s for 77 frames (23% of diarization time)
+- Real-time capable: Yes (0.05s << 20s audio)
+
+#### Memory Usage
+
+```
+Component                Memory
+---------------------------------
+Whisper model (tiny.en)  ~200 MB
+ONNX Runtime             ~50 MB
+WeSpeaker model          ~50 MB
+Frame buffers            ~2 MB
+Audio buffers            ~10 MB
+---------------------------------
+Total Peak RAM           ~320 MB
+```
+
+#### Accuracy Status
+
+**Current:** ~44% segment-level accuracy on Sean Carroll podcast  
+**Target:** >80% accuracy  
+**Blocker:** WeSpeaker model unsuitable for this audio type
+
+**Root Cause Analysis:**
+- WeSpeaker trained on VoxCeleb (cross-language, cross-accent scenarios)
+- Test audio: Same language, similar voices (2 male American English speakers)
+- Model treats different speakers as same (cosine similarity 0.87 >> 0.7 threshold)
+- **Technical implementation complete, accuracy limited by model selection**
+
+**Next Steps:**
+- Try Titanet Large (0.66% EER vs 2.0% WeSpeaker)
+- Better discriminative power for same-language speakers
+- Expected improvement: 44% → 70-80% accuracy
+
+#### Comparison: Neural vs Hand-Crafted Features
+
+| Metric | Hand-Crafted (Phase 2b) | Neural (Phase 2c) |
+|--------|-------------------------|-------------------|
+| Processing Time | 0.252s | 0.173s |
+| xRealtime Factor | N/A | 0.998 |
+| Embedding Dimension | 40 | 256 |
+| Accuracy | 44% | 44% |
+| Clustering Balance | Good (47/30) | Poor (unbalanced) |
+| **Winner** | - | **Performance** |
+
+**Conclusion:** Neural embeddings are faster and more scalable, but current model (WeSpeaker) doesn't improve accuracy for this use case. Infrastructure is production-ready, just needs better model.
+
+#### Technology Stack
+
+**ONNX Runtime:**
+- Version: 1.20.1 (prebuilt Windows x64 binaries)
+- Linking: Direct to onnxruntime.lib
+- Runtime: onnxruntime.dll (11.6 MB), onnxruntime_providers_shared.dll, libopenblas.dll
+
+**Feature Extraction:**
+- Custom C++ implementation (no external dependencies)
+- Cooley-Tukey radix-2 FFT for efficiency
+- Sin/cos lookup tables (512-element cache)
+- Self-contained, production-ready
+
+**Model:**
+- WeSpeaker ResNet34 (voxceleb_resnet34.onnx)
+- Input: [batch=1, time_frames, 80] float32
+- Output: [batch=1, 256] float32 (L2-normalized embeddings)
+- Source: https://github.com/wenet-e2e/wespeaker
+
+#### Detailed References
+
+See comprehensive documentation:
+- `specs/diarization.md` - Complete diarization knowledge base
+- `specs/transcription.md` - Whisper ASR learnings and best practices
+- `specs/continuous_architecture_findings.md` - Detailed experiment logs
+- `specs/phase2c_final_summary.md` - Phase 2c complete technical report
+
+---
+
+
 

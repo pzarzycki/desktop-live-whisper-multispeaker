@@ -117,6 +117,7 @@ if(NOT BUILD_APP)
     add_library(diarization STATIC
         src/diar/speaker_cluster.cpp
         src/diar/onnx_embedder.cpp
+        src/diar/mel_features.cpp
     )
     target_include_directories(diarization PUBLIC src)
     
@@ -137,6 +138,15 @@ if(NOT BUILD_APP)
                 "${ONNXRUNTIME_ROOT}/lib/onnxruntime_providers_shared.dll"
                 "$<TARGET_FILE_DIR:diarization>"
         )
+        
+        # Copy OpenBLAS DLL if available (needed by whisper.cpp)
+        if (EXISTS "${CMAKE_SOURCE_DIR}/third_party/openblas/bin/libopenblas.dll")
+            add_custom_command(TARGET diarization POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    "${CMAKE_SOURCE_DIR}/third_party/openblas/bin/libopenblas.dll"
+                    "$<TARGET_FILE_DIR:diarization>"
+            )
+        endif()
     else()
         message(FATAL_ERROR "ONNX Runtime not found. Run: ./scripts/download_onnxruntime.ps1")
     endif()

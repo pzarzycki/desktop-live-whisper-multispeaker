@@ -15,6 +15,9 @@ namespace Ort {
 
 namespace diar {
 
+// Forward declaration
+class MelFeatureExtractor;
+
 /**
  * ONNX-based neural speaker embedding extractor.
  * Uses pretrained models like ECAPA-TDNN for high-quality speaker embeddings.
@@ -59,9 +62,14 @@ private:
     std::unique_ptr<Ort::AllocatorWithDefaultOptions> m_allocator;
     std::unique_ptr<Ort::MemoryInfo> m_memory_info;
     
-    std::vector<const char*> m_input_names;
-    std::vector<const char*> m_output_names;
+    std::vector<std::string> m_input_name_strings;   // Actual string storage
+    std::vector<std::string> m_output_name_strings;  // Actual string storage
+    std::vector<const char*> m_input_names;          // Pointers for ONNX API
+    std::vector<const char*> m_output_names;         // Pointers for ONNX API
     int m_embedding_dim = 192;  // Default for ECAPA-TDNN
+    
+    // Mel feature extractor (for models that expect Fbank features)
+    std::unique_ptr<MelFeatureExtractor> m_mel_extractor;
     
     /**
      * Preprocess audio: convert int16 to float32, normalize, pad/trim.
