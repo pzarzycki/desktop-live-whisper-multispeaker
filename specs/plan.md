@@ -67,62 +67,110 @@
 
 ---
 
-## Phase 2d: Titanet Large Model - NEXT 🎯
+## Phase 2d: Better Speaker Model - IN PROGRESS 🔄
 
 ### Objective: Improve Accuracy from 44% to >80%
 
-**Approach:** Try better model with stronger discriminative power
+**Initial Plan:** Try Titanet Large (0.66% EER)  
+**Reality Check:** No pre-converted ONNX available (requires PyTorch + NeMo conversion)
 
-### Action Items:
+**Revised Approach:** Try alternative WeSpeaker models (faster validation)
 
-1. **Download Titanet Large**
-   - Source: NVIDIA NeMo repository
-   - Size: 32 MB
-   - Embeddings: 192-dim
-   - Performance: 0.66% EER (vs 2.0% WeSpeaker)
+### Model Search Results (2025-10-07)
 
-2. **Convert to ONNX** (if needed)
-   - Check if pre-converted ONNX available
-   - If not, export from NeMo checkpoint
-   - Validate input/output formats
+**Searched:**
+- Titanet Large: Found 8 models on HuggingFace, **no ONNX versions**
+- ECAPA-TDNN: Found 30 models, **no pre-converted ONNX**
+- WeSpeaker: Found 20 models, **all PyTorch checkpoints**
 
-3. **Integrate into Codebase**
-   - Update `OnnxSpeakerEmbedder` for new input shape (if different)
-   - Adjust embedding dimension (256 → 192)
-   - Update clustering threshold (may need tuning)
+**Key Finding:** No production-ready ONNX models available for better architectures
 
-4. **Test on Sean Carroll Podcast**
-   - Measure cosine similarity for different speakers
-   - Target: < 0.7 (lower = better discrimination)
-   - Calculate segment-level accuracy
-   - Target: > 70% (stretch: 80%)
+### Revised Strategy: Pragmatic Approach
 
-5. **Document Results**
-   - Update `specs/diarization.md`
-   - Performance comparison table
-   - Decision: Keep Titanet or try another model
+**Option A: Test Alternative WeSpeaker Models** 🎯 **TRYING FIRST**
 
-### Success Criteria:
+Available models from WeSpeaker on HuggingFace:
+1. **CAMPlus** (`Wespeaker/wespeaker-voxceleb-campplus`)
+   - Newer architecture than ResNet34
+   - Potentially better discriminative power
+   - Same VoxCeleb training (but different architecture)
 
-- ✅ Cosine similarity < 0.7 for different speakers
-- ✅ Segment-level accuracy > 70%
-- ✅ Real-time performance maintained (<1% overhead)
-- ✅ No Whisper quality regression
+2. **ECAPA-TDNN 1024** (`Wespeaker/wespeaker-voxceleb-ecapa-tdnn1024`)
+   - Larger capacity (1024-dim vs 256-dim ResNet34)
+   - ECAPA is state-of-art for speaker verification
+   - Same VoxCeleb training
 
-### Estimated Time: 4-6 hours
+**Pros:**
+- Can test quickly (download → convert to ONNX → test)
+- Existing infrastructure ready
+- 30-60 minutes per model
 
-### Fallback Plan (if Titanet fails):
+**Cons:**
+- Still VoxCeleb-trained (may have same limitation)
+- Not guaranteed to fix accuracy
 
-**Option B: Hybrid Approach**
-- Combine neural (256-dim) + hand-crafted (40-dim) = 296-dim
-- Weight: 70% neural + 30% hand-crafted
-- May capture complementary information
+**Action plan:**
+1. Download CAMPlus PyTorch checkpoint
+2. Convert to ONNX using torch.onnx.export()
+3. Test on Sean Carroll podcast
+4. If fails, try ECAPA-TDNN 1024
+5. Measure accuracy improvement
 
-**Option C: Try ECAPA-TDNN**
-- SpeechBrain model
-- 0.69% EER (similar to Titanet)
-- 192-dim embeddings
-- Requires ONNX export from Python
+---
+
+**Option B: Hybrid Approach** (if Option A fails)
+
+Combine neural embeddings with hand-crafted features:
+```python
+embedding = concatenate([
+    neural_256dim * 0.7,      # WeSpeaker (good for some speakers)
+    handcrafted_40dim * 0.3   # MFCCs+pitch (captures prosody)
+])
+# Total: 296-dim hybrid embedding
+```
+
+**Rationale:**
+- Neural: Good at global voice timbre
+- Hand-crafted: Good at prosodic differences
+- Combined might capture complementary information
+
+**Estimated time:** 1-2 hours (modify embedding extraction code)
+
+---
+
+**Option C: Full Conversion** (last resort)
+
+Convert Titanet Large or ECAPA-TDNN from source:
+
+Requirements:
+- PyTorch installation
+- NeMo toolkit (for Titanet) or SpeechBrain (for ECAPA)
+- Model checkpoint download
+- ONNX export script
+- Input/output format validation
+
+**Estimated time:** 2-4 hours
+
+**Only if:** Options A and B both fail
+
+---
+
+### Current Status: Trying CAMPlus
+
+**Next immediate steps:**
+1. Create ONNX conversion script for PyTorch models
+2. Download CAMPlus checkpoint
+3. Convert to ONNX
+4. Test with existing infrastructure
+5. Measure accuracy
+
+**Success criteria (same as before):**
+- Cosine similarity < 0.7 for different speakers
+- Segment-level accuracy > 70%
+- Real-time performance maintained
+- No Whisper quality regression
+
+**Time estimate:** 2-3 hours (including testing)
 
 ---
 
