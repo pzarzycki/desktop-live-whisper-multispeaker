@@ -232,6 +232,22 @@ if(NOT BUILD_APP)
     target_compile_features(test_frame_voting PRIVATE cxx_std_20)
     target_include_directories(test_frame_voting PRIVATE src)
     target_link_libraries(test_frame_voting PRIVATE audio_windows asr_whisper diarization)
+    
+    # Application API - TranscriptionController library
+    add_library(app_controller STATIC
+        src/app/transcription_controller.cpp
+    )
+    target_compile_features(app_controller PUBLIC cxx_std_20)
+    target_include_directories(app_controller PUBLIC src)
+    target_link_libraries(app_controller PUBLIC audio_windows asr_whisper diarization)
+    
+    # Test application for TranscriptionController API
+    add_executable(test_controller_api
+        apps/test_controller_api.cpp
+    )
+    target_compile_features(test_controller_api PRIVATE cxx_std_20)
+    target_include_directories(test_controller_api PRIVATE src)
+    target_link_libraries(test_controller_api PRIVATE app_controller)
 endif()
 
 

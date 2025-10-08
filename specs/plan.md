@@ -1,8 +1,8 @@
 # Current Project Status & Plan
 
-**Last Updated:** 2025-10-07  
-**Current Phase:** Phase 3 Steps 1-2 Complete (Word-Level Speaker Assignment)  
-**Next:** Debug clustering sensitivity, integrate into main app
+**Last Updated:** 2025-10-08  
+**Current Phase:** Phase 3 Complete, Application API Designed  
+**Next:** Integrate frame voting into main app, build GUI
 
 ---
 
@@ -820,9 +820,80 @@ For each Whisper segment:
 
 ---
 
-## Phase 4: Integration & Polish - NEXT 🎯
+## Phase 4: Application API Layer - IN PROGRESS 🎯
 
-### Objective: Integrate Phase 3 findings into production app
+### Objective: Design clean API between transcription engine and GUI
+
+**Completed Tasks:**
+
+✅ **API Design Document** (`specs/application_api_design.md`)
+- Event-driven architecture with callbacks
+- TranscriptionChunk: Text + speaker + timestamps + confidence
+- SpeakerReclassification: Retroactive speaker updates
+- Clean separation: Engine → Controller → GUI
+
+✅ **Core Interface** (`src/app/transcription_controller.hpp`)
+- TranscriptionController class (PIMPL pattern)
+- Device management: list/select audio devices
+- Lifecycle: start/stop/pause/resume
+- Event subscription: chunks, reclassification, status, errors
+- Speaker management: count, max speakers
+- Chunk history: get all, get by ID, clear
+
+✅ **Skeleton Implementation** (`src/app/transcription_controller.cpp`)
+- PIMPL implementation with thread safety
+- Event emission with exception handling
+- Callback system (observer pattern)
+- Basic lifecycle management
+- Test passes: Device enumeration, start/stop, pause/resume
+
+✅ **Test Application** (`apps/test_controller_api.cpp`)
+- Interactive demo with colored output
+- Device selection
+- Event monitoring (chunks, reclassification, status, errors)
+- Pause/resume testing
+- Full transcript display with speaker distribution
+
+**Remaining Tasks:**
+
+1. **Wire Up Real Transcription**
+   - Integrate WASAPI audio capture
+   - Connect to Whisper ASR
+   - Connect to speaker diarization
+   - Implement frame voting within processing loop
+
+2. **Implement Reclassification Logic**
+   - Detect isolated chunks (S0 S1 S0 → S0 S0 S0)
+   - Low confidence followed by high confidence
+   - Very short turns surrounded by different speaker
+
+3. **Real-time Timing**
+   - Implement session_start_time_ms properly
+   - Calculate elapsed_ms accurately
+   - Compute realtime_factor from audio duration
+
+4. **Performance Testing**
+   - Test with real microphone input
+   - Measure chunk emission latency
+   - Validate reclassification triggers
+   - Benchmark CPU usage
+
+**Architecture Benefits:**
+
+✅ Clean separation of concerns (Engine ↔ Controller ↔ GUI)
+✅ Event-driven (no polling)
+✅ Thread-safe (callbacks from processing thread)
+✅ Retroactive updates (reclassification)
+✅ GUI-framework agnostic (works with Qt, Win32, etc.)
+✅ Production-ready design patterns
+
+**Next Steps:** Complete wiring to transcription engine, then start GUI development
+
+---
+
+## Phase 5: Integration & Polish - NEXT
+
+### Objective: Wire controller to engine, polish for production
 
 **Tasks:**
 
