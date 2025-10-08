@@ -256,7 +256,7 @@ std::vector<WhisperSegment> WhisperBackend::transcribe_chunk_segments(const int1
 	wparams.n_threads        = (g_ws.n_threads == 0) ? std::max(1u, std::thread::hardware_concurrency()) : g_ws.n_threads;
 	wparams.offset_ms        = 0;
 	wparams.duration_ms      = 0;
-	wparams.token_timestamps = false;
+	wparams.token_timestamps = true;  // Enable token-level timestamps for word boundaries
 	wparams.max_len          = 0;
 	wparams.split_on_word    = false;
 	wparams.audio_ctx        = 0;
@@ -338,7 +338,9 @@ std::vector<WhisperSegmentWithWords> WhisperBackend::transcribe_chunk_with_words
 #if defined(WHISPER_BACKEND_AVAILABLE)
 	if (!g_ws.ctx) return segments;
 	
-	// Configure parameters with token timestamps enabled
+	// Use same parameters as transcribe_chunk_segments for quality
+	// Note: Whisper.cpp token timestamps are experimental and can break transcription
+	// Instead, we'll estimate word positions from segment timing + text
 	whisper_full_params wparams = whisper_full_default_params(WHISPER_SAMPLING_GREEDY);
 	wparams.print_realtime   = false;
 	wparams.print_progress   = false;
@@ -350,7 +352,7 @@ std::vector<WhisperSegmentWithWords> WhisperBackend::transcribe_chunk_with_words
 	wparams.n_threads        = (g_ws.n_threads == 0) ? std::max(1u, std::thread::hardware_concurrency()) : g_ws.n_threads;
 	wparams.offset_ms        = 0;
 	wparams.duration_ms      = 0;
-	wparams.token_timestamps = true;  // ENABLE TOKEN TIMESTAMPS
+	wparams.token_timestamps = false;  // Keep OFF - experimental and breaks quality
 	wparams.max_len          = 0;
 	wparams.split_on_word    = false;
 	wparams.audio_ctx        = 0;
@@ -380,6 +382,64 @@ std::vector<WhisperSegmentWithWords> WhisperBackend::transcribe_chunk_with_words
 	} else {
 		n_segments = whisper_full_n_segments(g_ws.ctx);
 	}
+	
+	// Helper: split text into words and estimate timestamps
+	auto estimate_word_timestamps = [](const std::string& text, int64_t t0_ms, int64_t t1_ms) -> std::vector<WhisperWord> {
+		std::vector<WhisperWord> words;
+		if (text.empty()) return words;
+		
+		// Split text into words (simple whitespace split)
+		std::vector<std::string> word_texts;
+		std::string current_word;
+		for (char c : text) {
+			if (c == ' ' || c == '\t' || c == '\n') {
+				if (!current_word.empty()) {
+					word_texts.push_back(current_word);
+					current_word.clear();
+				}
+			} else {
+				current_word += c;
+			}
+		}
+		if (!current_word.empty()) {
+			word_texts.push_back(current_word);
+		}
+		
+		if (word_texts.empty()) return words;
+		
+		// Estimate timing: distribute segment duration across words proportionally
+		// Simple approach: equal time per character
+		size_t total_chars = 0;
+		for (const auto& w : word_texts) {
+			total_chars += w.size();
+		}
+		
+		if (total_chars == 0) return words;
+		
+		int64_t duration_ms = t1_ms - t0_ms;
+		int64_t current_time = t0_ms;
+		
+		for (const auto& word_text : word_texts) {
+			WhisperWord w;
+			w.word = word_text;
+			w.t0_ms = current_time;
+			
+			// Allocate time proportional to word length
+			int64_t word_duration = (duration_ms * word_text.size()) / total_chars;
+			current_time += word_duration;
+			
+			w.t1_ms = current_time;
+			w.probability = 1.0f;  // No per-word probability available
+			words.push_back(w);
+		}
+		
+		// Ensure last word ends at segment end
+		if (!words.empty()) {
+			words.back().t1_ms = t1_ms;
+		}
+		
+		return words;
+	};
 	
 	for (int i = 0; i < n_segments; ++i) {
 		const char* txt = nullptr;
@@ -414,89 +474,18 @@ std::vector<WhisperSegmentWithWords> WhisperBackend::transcribe_chunk_with_words
 		}
 		if (seg_text.empty()) continue;
 		
-		// Get token count for this segment
-		int n_tokens = 0;
-		if (g_ws.state) {
-			n_tokens = whisper_full_n_tokens_from_state(g_ws.state, i);
-		} else {
-			n_tokens = whisper_full_n_tokens(g_ws.ctx, i);
-		}
+		// Convert timestamps from centiseconds to milliseconds
+		int64_t t0_ms = t0 * 10;
+		int64_t t1_ms = t1 * 10;
 		
-		// Extract word-level timestamps from tokens
-		std::vector<WhisperWord> words;
-		std::string current_word;
-		int64_t word_start = -1;
-		int64_t word_end = -1;
-		float word_prob = 0.0f;
-		int word_token_count = 0;
+		// Estimate word positions
+		std::vector<WhisperWord> words = estimate_word_timestamps(seg_text, t0_ms, t1_ms);
 		
-		for (int j = 0; j < n_tokens; ++j) {
-			whisper_token_data token_data;
-			if (g_ws.state) {
-				token_data = whisper_full_get_token_data_from_state(g_ws.state, i, j);
-			} else {
-				token_data = whisper_full_get_token_data(g_ws.ctx, i, j);
-			}
-			
-			const char* token_text = nullptr;
-			if (g_ws.state) {
-				token_text = whisper_full_get_token_text_from_state(g_ws.ctx, g_ws.state, i, j);
-			} else {
-				token_text = whisper_full_get_token_text(g_ws.ctx, i, j);
-			}
-			
-			if (!token_text) continue;
-			std::string tok(token_text);
-			
-			// Skip special tokens (timestamps, etc.)
-			if (tok.empty() || tok[0] == '<' || tok[0] == '[') continue;
-			
-			// Check if this is a word boundary (starts with space or is first token)
-			bool is_word_start = (j == 0) || (tok[0] == ' ');
-			
-			if (is_word_start && !current_word.empty()) {
-				// Save previous word
-				trim(current_word);
-				if (!current_word.empty() && word_start >= 0) {
-					WhisperWord w;
-					w.word = current_word;
-					w.t0_ms = word_start * 10;  // Convert from centiseconds
-					w.t1_ms = word_end * 10;
-					w.probability = (word_token_count > 0) ? (word_prob / word_token_count) : 0.0f;
-					words.push_back(w);
-				}
-				// Start new word
-				current_word = tok;
-				word_start = token_data.t0;
-				word_end = token_data.t1;
-				word_prob = token_data.p;
-				word_token_count = 1;
-			} else {
-				// Continue current word
-				current_word += tok;
-				if (word_start < 0) word_start = token_data.t0;
-				word_end = token_data.t1;
-				word_prob += token_data.p;
-				word_token_count++;
-			}
-		}
-		
-		// Save last word
-		trim(current_word);
-		if (!current_word.empty() && word_start >= 0) {
-			WhisperWord w;
-			w.word = current_word;
-			w.t0_ms = word_start * 10;
-			w.t1_ms = word_end * 10;
-			w.probability = (word_token_count > 0) ? (word_prob / word_token_count) : 0.0f;
-			words.push_back(w);
-		}
-		
-		// Create segment with words
+		// Create segment with estimated word timestamps
 		WhisperSegmentWithWords seg;
 		seg.text = seg_text;
-		seg.t0_ms = t0 * 10;
-		seg.t1_ms = t1 * 10;
+		seg.t0_ms = t0_ms;
+		seg.t1_ms = t1_ms;
 		seg.words = std::move(words);
 		segments.push_back(seg);
 	}
