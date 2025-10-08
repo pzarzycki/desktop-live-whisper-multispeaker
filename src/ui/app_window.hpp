@@ -26,6 +26,7 @@ public:
 private:
     // UI state
     bool is_recording_ = false;
+    bool show_settings_ = false;  // Settings window visibility
     bool use_synthetic_audio_ = true;
     char audio_file_path_[256] = "output/whisper_input_16k.wav";
     char whisper_model_[64] = "tiny.en";
@@ -56,7 +57,7 @@ private:
     void RenderMainWindow();
     void RenderControlPanel();
     void RenderTranscriptView();
-    void RenderSettingsPanel();
+    void RenderSettingsWindow();  // Separate settings window
     void RenderStatusBar();
 
     // Event handlers

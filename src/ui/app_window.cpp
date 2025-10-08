@@ -54,6 +54,11 @@ AppWindow::~AppWindow() {
 
 void AppWindow::Render() {
     RenderMainWindow();
+    
+    // Render settings window if open
+    if (show_settings_) {
+        RenderSettingsWindow();
+    }
 }
 
 void AppWindow::RenderMainWindow() {
@@ -81,9 +86,6 @@ void AppWindow::RenderMainWindow() {
     ImGui::Spacing();
     
     RenderTranscriptView();
-    ImGui::Spacing();
-    
-    RenderSettingsPanel();
     ImGui::Spacing();
     
     RenderStatusBar();
@@ -119,6 +121,12 @@ void AppWindow::RenderControlPanel() {
     ImGui::SameLine();
     if (ImGui::Button("Clear")) {
         OnClearClicked();
+    }
+    
+    // Settings button
+    ImGui::SameLine();
+    if (ImGui::Button("Settings...")) {
+        show_settings_ = true;
     }
 }
 
@@ -164,23 +172,57 @@ void AppWindow::RenderTranscriptView() {
     ImGui::EndChild();
 }
 
-void AppWindow::RenderSettingsPanel() {
-    ImGui::Text("Settings");
-    ImGui::Separator();
+void AppWindow::RenderSettingsWindow() {
+    // Settings window (closeable, resizable)
+    ImGui::SetNextWindowSize(ImVec2(500, 400), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowPos(ImVec2(100, 100), ImGuiCond_FirstUseEver);
     
-    ImGui::BeginDisabled(is_recording_);
-    
-    ImGui::Checkbox("Synthetic Audio", &use_synthetic_audio_);
-    
-    ImGui::BeginDisabled(!use_synthetic_audio_);
-    ImGui::InputText("Audio File", audio_file_path_, sizeof(audio_file_path_));
-    ImGui::EndDisabled();
-    
-    ImGui::InputText("Model", whisper_model_, sizeof(whisper_model_));
-    ImGui::SliderInt("Max Speakers", &max_speakers_, 1, 5);
-    ImGui::SliderFloat("Speaker Threshold", &speaker_threshold_, 0.0f, 1.0f);
-    
-    ImGui::EndDisabled();
+    if (ImGui::Begin("Settings", &show_settings_, ImGuiWindowFlags_None)) {
+        ImGui::TextWrapped("Configure transcription settings. Changes take effect when you start recording.");
+        ImGui::Separator();
+        ImGui::Spacing();
+        
+        ImGui::BeginDisabled(is_recording_);
+        
+        // Audio Source
+        ImGui::SeparatorText("Audio Source");
+        ImGui::Checkbox("Use Synthetic Audio (for testing)", &use_synthetic_audio_);
+        
+        ImGui::BeginDisabled(!use_synthetic_audio_);
+        ImGui::SetNextItemWidth(-1);
+        ImGui::InputText("##AudioFile", audio_file_path_, sizeof(audio_file_path_));
+        ImGui::TextDisabled("Path to .wav file (16kHz mono)");
+        ImGui::EndDisabled();
+        
+        ImGui::Spacing();
+        
+        // Whisper Model
+        ImGui::SeparatorText("Whisper Model");
+        ImGui::SetNextItemWidth(200);
+        ImGui::InputText("##Model", whisper_model_, sizeof(whisper_model_));
+        ImGui::TextDisabled("Model: tiny.en, base.en, small.en, medium.en, large");
+        
+        ImGui::Spacing();
+        
+        // Speaker Diarization
+        ImGui::SeparatorText("Speaker Diarization");
+        ImGui::SliderInt("Max Speakers", &max_speakers_, 1, 5);
+        ImGui::TextDisabled("Maximum number of speakers to detect");
+        
+        ImGui::SliderFloat("Speaker Threshold", &speaker_threshold_, 0.0f, 1.0f, "%.3f");
+        ImGui::TextDisabled("Lower = more sensitive (may split speakers), Higher = less sensitive");
+        
+        ImGui::EndDisabled();
+        
+        ImGui::Spacing();
+        ImGui::Separator();
+        
+        // Close button
+        if (ImGui::Button("Close", ImVec2(120, 0))) {
+            show_settings_ = false;
+        }
+    }
+    ImGui::End();
 }
 
 void AppWindow::RenderStatusBar() {
