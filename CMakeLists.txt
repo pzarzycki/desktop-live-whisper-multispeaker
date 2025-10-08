@@ -178,6 +178,60 @@ if(NOT BUILD_APP)
     target_compile_features(test_word_speaker_mapping PRIVATE cxx_std_20)
     target_include_directories(test_word_speaker_mapping PRIVATE src)
     target_link_libraries(test_word_speaker_mapping PRIVATE asr_whisper audio_windows diarization)
+
+    # Diagnostic tool for embedding quality analysis
+    add_executable(test_embedding_quality
+        apps/test_embedding_quality.cpp
+        src/audio/file_capture.cpp
+    )
+    target_compile_features(test_embedding_quality PRIVATE cxx_std_20)
+    target_include_directories(test_embedding_quality PRIVATE src)
+    target_link_libraries(test_embedding_quality PRIVATE audio_windows diarization)
+    
+    # Word-level clustering test (the RIGHT approach!)
+    add_executable(test_word_clustering
+        apps/test_word_clustering.cpp
+        src/audio/file_capture.cpp
+    )
+    target_compile_features(test_word_clustering PRIVATE cxx_std_20)
+    target_include_directories(test_word_clustering PRIVATE src)
+    target_link_libraries(test_word_clustering PRIVATE audio_windows asr_whisper diarization)
+    
+    # Word-level clustering V2 (clean sequential)
+    add_executable(test_word_clustering_v2
+        apps/test_word_clustering_v2.cpp
+        src/audio/file_capture.cpp
+    )
+    target_compile_features(test_word_clustering_v2 PRIVATE cxx_std_20)
+    target_include_directories(test_word_clustering_v2 PRIVATE src)
+    target_link_libraries(test_word_clustering_v2 PRIVATE audio_windows asr_whisper diarization)
+    
+    # Boundary detection approach
+    add_executable(test_boundary_detection
+        apps/test_boundary_detection.cpp
+        src/audio/file_capture.cpp
+    )
+    target_compile_features(test_boundary_detection PRIVATE cxx_std_20)
+    target_include_directories(test_boundary_detection PRIVATE src)
+    target_link_libraries(test_boundary_detection PRIVATE audio_windows asr_whisper diarization)
+    
+    # Segment-level speaker assignment (BEST approach!)
+    add_executable(test_segment_speakers
+        apps/test_segment_speakers.cpp
+        src/audio/file_capture.cpp
+    )
+    target_compile_features(test_segment_speakers PRIVATE cxx_std_20)
+    target_include_directories(test_segment_speakers PRIVATE src)
+    target_link_libraries(test_segment_speakers PRIVATE audio_windows asr_whisper diarization)
+    
+    # Frame-level voting within segments
+    add_executable(test_frame_voting
+        apps/test_frame_voting.cpp
+        src/audio/file_capture.cpp
+    )
+    target_compile_features(test_frame_voting PRIVATE cxx_std_20)
+    target_include_directories(test_frame_voting PRIVATE src)
+    target_link_libraries(test_frame_voting PRIVATE audio_windows asr_whisper diarization)
 endif()
 
 

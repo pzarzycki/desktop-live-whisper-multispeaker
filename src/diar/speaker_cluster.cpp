@@ -1041,18 +1041,75 @@ void ContinuousFrameAnalyzer::cluster_frames(int max_speakers, float threshold) 
                 m_frames.size(), max_speakers, threshold);
     }
     
-    // Initialize first frame as Speaker 0
-    m_frames[0].speaker_id = 0;
-    m_frames[0].confidence = 1.0f;
+    // IMPROVED ALGORITHM: K-means++ initialization
+    // Instead of greedy sequential, use proper clustering
     
-    // Maintain speaker centroids (running averages)
+    // Step 1: Find most dissimilar frames as initial centroids
     std::vector<std::vector<float>> centroids;
-    centroids.push_back(m_frames[0].embedding);
     std::vector<int> centroid_counts;
-    centroid_counts.push_back(1);
+    std::vector<bool> used_as_seed(m_frames.size(), false);
     
-    // Cluster remaining frames
-    for (size_t i = 1; i < m_frames.size(); ++i) {
+    // First centroid: use first frame
+    centroids.push_back(m_frames[0].embedding);
+    used_as_seed[0] = true;
+    centroid_counts.push_back(0);
+    
+    if (m_config.verbose) {
+        fprintf(stderr, "[cluster_frames] Initial centroid S0: frame 0\n");
+    }
+    
+    // Find additional centroids (k-means++ style)
+    while (static_cast<int>(centroids.size()) < max_speakers) {
+        // Find frame most dissimilar to existing centroids
+        float min_max_sim = 2.0f;  // Start high
+        size_t best_frame = 0;
+        
+        for (size_t i = 0; i < m_frames.size(); ++i) {
+            if (used_as_seed[i]) continue;
+            
+            // Find max similarity to any existing centroid
+            float max_sim_to_any = -1.0f;
+            for (const auto& centroid : centroids) {
+                float sim = cosine(m_frames[i].embedding, centroid);
+                if (sim > max_sim_to_any) {
+                    max_sim_to_any = sim;
+                }
+            }
+            
+            // We want the frame with MIN of these max similarities
+            // (i.e., the frame furthest from all existing centroids)
+            if (max_sim_to_any < min_max_sim) {
+                min_max_sim = max_sim_to_any;
+                best_frame = i;
+            }
+        }
+        
+        // Check if this frame is sufficiently dissimilar
+        if (min_max_sim < threshold) {
+            centroids.push_back(m_frames[best_frame].embedding);
+            used_as_seed[best_frame] = true;
+            centroid_counts.push_back(0);
+            
+            if (m_config.verbose) {
+                fprintf(stderr, "[cluster_frames] Added centroid S%zu: frame %zu (max_sim=%.3f < threshold=%.3f)\n",
+                        centroids.size() - 1, best_frame, min_max_sim, threshold);
+            }
+        } else {
+            // No more dissimilar frames
+            if (m_config.verbose) {
+                fprintf(stderr, "[cluster_frames] No more dissimilar frames (min_max_sim=%.3f >= threshold=%.3f)\n",
+                        min_max_sim, threshold);
+            }
+            break;
+        }
+    }
+    
+    if (m_config.verbose) {
+        fprintf(stderr, "[cluster_frames] Initialized %zu centroids\n", centroids.size());
+    }
+    
+    // Step 2: Assign all frames to nearest centroid
+    for (size_t i = 0; i < m_frames.size(); ++i) {
         // Find best matching centroid
         int best_speaker = 0;
         float best_sim = cosine(m_frames[i].embedding, centroids[0]);
@@ -1065,31 +1122,49 @@ void ContinuousFrameAnalyzer::cluster_frames(int max_speakers, float threshold) 
             }
         }
         
-        // Create new speaker if similarity too low and haven't hit max
-        if (best_sim < threshold && static_cast<int>(centroids.size()) < max_speakers) {
-            best_speaker = static_cast<int>(centroids.size());
-            centroids.push_back(m_frames[i].embedding);
-            centroid_counts.push_back(1);
-            m_frames[i].speaker_id = best_speaker;
-            m_frames[i].confidence = 1.0f;
-            
-            if (m_config.verbose) {
-                fprintf(stderr, "[cluster_frames] Frame %zu: Created new speaker S%d (sim=%.3f < threshold=%.3f)\n",
-                        i, best_speaker, best_sim, threshold);
-            }
-        } else {
-            // Assign to best matching speaker
-            m_frames[i].speaker_id = best_speaker;
-            m_frames[i].confidence = best_sim;
-            
-            // Update centroid (running average)
-            int count = centroid_counts[best_speaker];
-            for (size_t d = 0; d < centroids[best_speaker].size(); ++d) {
-                centroids[best_speaker][d] = 
-                    (centroids[best_speaker][d] * count + m_frames[i].embedding[d]) / (count + 1);
-            }
-            centroid_counts[best_speaker]++;
+        m_frames[i].speaker_id = best_speaker;
+        m_frames[i].confidence = best_sim;
+        centroid_counts[best_speaker]++;
+    }
+    
+    // Step 3: Refine centroids (1 iteration of k-means)
+    std::vector<std::vector<float>> new_centroids(centroids.size());
+    for (auto& c : new_centroids) {
+        c.resize(centroids[0].size(), 0.0f);
+    }
+    
+    for (size_t i = 0; i < m_frames.size(); ++i) {
+        int sid = m_frames[i].speaker_id;
+        for (size_t d = 0; d < m_frames[i].embedding.size(); ++d) {
+            new_centroids[sid][d] += m_frames[i].embedding[d];
         }
+    }
+    
+    for (size_t s = 0; s < new_centroids.size(); ++s) {
+        if (centroid_counts[s] > 0) {
+            for (size_t d = 0; d < new_centroids[s].size(); ++d) {
+                new_centroids[s][d] /= centroid_counts[s];
+            }
+        }
+    }
+    
+    // Reassign with refined centroids
+    std::fill(centroid_counts.begin(), centroid_counts.end(), 0);
+    for (size_t i = 0; i < m_frames.size(); ++i) {
+        int best_speaker = 0;
+        float best_sim = cosine(m_frames[i].embedding, new_centroids[0]);
+        
+        for (size_t s = 1; s < new_centroids.size(); ++s) {
+            float sim = cosine(m_frames[i].embedding, new_centroids[s]);
+            if (sim > best_sim) {
+                best_sim = sim;
+                best_speaker = static_cast<int>(s);
+            }
+        }
+        
+        m_frames[i].speaker_id = best_speaker;
+        m_frames[i].confidence = best_sim;
+        centroid_counts[best_speaker]++;
     }
     
     // Report clustering results
