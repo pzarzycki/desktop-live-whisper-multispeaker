@@ -1,8 +1,8 @@
 # Current Project Status & Plan
 
 **Last Updated:** 2025-10-08  
-**Current Phase:** Phase 3 Complete, Application API Designed  
-**Next:** Integrate frame voting into main app, build GUI
+**Current Phase:** Phase 5 Complete (ImGui GUI)  
+**Next:** Phase 6 - Implement TranscriptionController.processing_loop()
 
 ---
 
@@ -891,79 +891,188 @@ For each Whisper segment:
 
 ---
 
-## Phase 5: GUI Development - IN PROGRESS 🎯
+## Phase 5: GUI Development - COMPLETE ✅
 
-### FRAMEWORK CHANGE: Qt6 → Dear ImGui
+### Framework Decision: Dear ImGui (MIT License)
 
-**Reason:** Qt6 LGPL licensing not suitable for commercial closed-source software
-**New Choice:** Dear ImGui (MIT license - fully commercial-friendly!)
+**Why ImGui chosen over Qt6:**
+- Qt6 LGPL requires re-linking mechanism (incompatible with closed-source commercial)
+- Commercial Qt license: ~$5,000+/year per developer (too expensive)
+- ImGui MIT license: fully permissive, zero restrictions, commercial-friendly
+- Distribution size: 30KB vs Qt's 20MB DLLs (97% smaller)
+- Development simplicity: All C++, no separate UI language, no installation needed
 
-**Advantages:**
-- ✅ **MIT License** - no commercial restrictions, no LGPL obligations
-- ✅ **Tiny Size** - 30 KB vs Qt's 20 MB DLLs
-- ✅ **Simple API** - immediate mode, all C++, no separate UI language
-- ✅ **No Installation** - just source files in project (git submodule)
-- ✅ **Single Executable** - static linking, no runtime dependencies
-- ✅ **Cross-Platform** - Windows (DirectX), macOS (Metal), Linux (OpenGL)
+**Architecture:**
+- **Platform-specific entry points:** 
+  * `src/ui/main_windows.cpp` - Windows/DirectX 11 (tested, working)
+  * `src/ui/main_macos.mm` - macOS/Metal (created, untested)
+- **Platform-independent UI:** `src/ui/app_window.hpp/cpp` (NO OS headers)
+- **Build system:** CMake selects entry point via `if(WIN32)`/`if(APPLE)`
 
-**Design:** Original concepts from `specs/gui_design.md` still valid (dark theme, colors, layout)
+**Completed Features:**
 
-**Implementation Status:** Code complete, ready to test!
+✅ **Build System**
+- ImGui added as git submodule (third_party/imgui/)
+- CMakeLists.txt configured for Windows/macOS
+- Static library build from ImGui sources
+- Platform backends: imgui_impl_win32.cpp, imgui_impl_dx11.cpp, imgui_impl_metal.mm
 
-**Phase 5.1: ImGui GUI** (1-2 days) - CURRENT ✅
+✅ **Font Rendering**
+- Fixed pixelated fonts issue
+- TrueType Segoe UI loaded from C:\Windows\Fonts\
+- DPI awareness: SetProcessDpiAwareness(PROCESS_PER_MONITOR_DPI_AWARE)
+- Font scaling based on GetDpiForWindow()
+- Crisp, anti-aliased text on all displays
 
-**Files Created:**
-- `third_party/imgui/` - Dear ImGui library (git submodule added)
-- `src/ui/app_window.hpp` - Main window class (70 lines)
-- `src/ui/app_window.cpp` - Window implementation (270 lines)
-- `src/ui/main_imgui.cpp` - Windows entry point with DirectX11 (210 lines)
-- Updated `CMakeLists.txt` - ImGui build configuration (no Qt dependency!)
+✅ **Main Window (app_window.cpp)**
+- Dark theme matching original design
+- Large START/STOP button (200x50px, colored, state-based)
+- Scrollable transcript with speaker colors
+- Auto-scroll to newest chunks
+- Speaker indicators ([S0], [S1]) with color coding:
+  * Speaker 0: Blue (#4A9EFF)
+  * Speaker 1: Red (#FF6B6B)
+  * Speaker 2: Teal (#4ECDC4)
+  * Speaker 3: Yellow (#FFE66D)
+- Timestamp display (MM:SS.mmm format)
+- Confidence display with warnings for low scores
 
-**Features Implemented:**
-- ✅ Dark theme matching original design
-- ✅ Large START/STOP button (colored, state-based)
-- ✅ Scrollable transcript with speaker colors
-- ✅ Speaker indicators ([S0], [S1]) with color coding
-- ✅ Settings panel (synthetic audio, model, speakers, threshold)
-- ✅ Status bar (elapsed time, chunk count, reclassifications)
-- ✅ Event integration with TranscriptionController
-- ✅ Auto-scroll transcript
-- ✅ Confidence warnings for low-confidence chunks
+✅ **Settings Window (Separate)**
+- Opened via "Settings..." button
+- Resizable, closeable, remembers position
+- Organized sections with SeparatorText:
+  * Audio Source: Synthetic/live toggle, file path input
+  * Whisper Model: Model selection with tooltip
+  * Speaker Diarization: Max speakers slider (1-5), threshold slider (0.0-1.0)
+- Tooltips explaining each setting
+- Settings disabled during recording (BeginDisabled)
 
-**Next Steps:**
-1. ⏳ Build with `BUILD_APP=ON` (no external dependencies needed!)
-2. ⏳ Test UI rendering
-3. ⏳ Verify start/stop functionality
-4. ⏳ Add synthetic audio support to controller config
+✅ **Status Bar**
+- Elapsed time display
+- Total chunk count
+- Reclassification count
+- Clear button for transcript
 
-**Phase 5.2: Speaker Statistics** (1 day)
-- Add speaker time tracking to API
-- Create SpeakerStatsPanel.qml
-- Wire up real-time updates
-- Display total time and percentages
+✅ **Controller Integration**
+- Event callbacks subscribed in constructor:
+  * OnChunkReceived() - adds chunks to transcript
+  * OnSpeakerReclassified() - updates speaker IDs
+  * OnStatusChanged() - updates recording state
+- start_transcription()/stop_transcription() wired to button
 
-**Phase 5.3: Settings & Polish** (1-2 days)
-- Create SettingsPanel.qml
-- Wire up model/threshold/device selection
-- Add keyboard shortcuts (Ctrl+R, etc.)
-- Add copy-to-clipboard
-- Smooth animations and transitions
+✅ **Testing & Validation**
+- Built successfully on Windows (MSVC 2022)
+- Runs at 60 FPS with smooth rendering
+- Font quality excellent (TrueType + DPI)
+- Settings window functional
+- No crashes, stable operation
 
-**Phase 5.4: Testing & Packaging** (1 day)
-- Test on Windows
-- Test on macOS
-- Create installer/package
-- Write user documentation
-
-**Estimated Timeline:** 5-7 days total
-
-**Current Status:** Design complete, ready to implement TranscriptionBridge
+**Status:** GUI fully functional, ready for controller implementation
 
 ---
 
-## Phase 6: Engine Integration - NEXT
+## Phase 6: Controller Implementation - NEXT 🎯
 
-### Objective: Wire controller to transcription engine
+### Objective: Implement TranscriptionController.processing_loop()
+
+**Current State:**
+- Controller skeleton exists: `src/app/transcription_controller.cpp`
+- Event system working (callbacks subscribed)
+- **processing_loop() is empty stub** - this is the critical missing piece
+
+**Implementation Task:**
+
+Wire together proven test components into production processing_loop():
+
+```cpp
+void TranscriptionController::processing_loop() {
+    // 1. Audio Capture
+    //    Source: test_windows_wasapi.cpp (WASAPI working)
+    //    Or: Load synthetic .wav file if config.use_synthetic_audio
+    
+    // 2. VAD Segmentation  
+    //    Detect speech vs silence
+    //    Create audio segments
+    
+    // 3. Whisper Transcription
+    //    Source: test_word_timestamps.cpp (working)
+    //    Get word-level timestamps
+    //    Process audio segments
+    
+    // 4. Speaker Embedding Extraction
+    //    Source: test_frame_voting.cpp (working)
+    //    ONNX model inference (CAMPlus)
+    //    Extract embeddings per word
+    
+    // 5. Frame Voting Diarization
+    //    Source: test_frame_voting.cpp (working)
+    //    Vote per frame (250ms granularity)
+    //    Assign speaker IDs
+    
+    // 6. Emit Events
+    //    Call chunk_callback_ with TranscriptionChunk
+    //    Update status via status_callback_
+    //    GUI receives events and updates display
+}
+```
+
+**Available Test Implementations:**
+- ✅ `apps/test_windows_wasapi.cpp` - Audio capture (WASAPI)
+- ✅ `apps/test_word_timestamps.cpp` - Whisper integration (word timestamps)
+- ✅ `apps/test_frame_voting.cpp` - Diarization (embeddings + frame voting)
+
+**Configuration Changes Needed:**
+
+Add to TranscriptionConfig:
+```cpp
+struct TranscriptionConfig {
+    // Existing fields...
+    
+    // Add these:
+    bool use_synthetic_audio = false;        // GUI checkbox
+    std::string synthetic_audio_file = "";   // GUI text input
+};
+```
+
+**Testing Plan:**
+
+1. **Synthetic Audio Mode:**
+   ```
+   1. Run app_desktop_whisper.exe
+   2. Open Settings window
+   3. Enable "Synthetic Audio"
+   4. Set path: "test_data/Sean_Carroll_podcast.wav"
+   5. Click START RECORDING
+   6. Watch transcripts appear with speaker colors!
+   ```
+
+2. **Live Microphone Mode:**
+   ```
+   1. Run app_desktop_whisper.exe
+   2. Disable "Synthetic Audio" in settings
+   3. Click START RECORDING
+   4. Speak into microphone
+   5. Watch live transcription
+   ```
+
+**Estimated Timeline:**
+- Copy/integrate test code: 4-6 hours
+- Add synthetic audio support: 2-3 hours
+- Testing & debugging: 4-6 hours
+- **Total: 1-2 days**
+
+**Phase 6.1: Processing Loop** (1-2 days) - IMMEDIATE NEXT
+
+**Tasks:**
+1. ⏳ Copy audio capture logic from test_windows_wasapi.cpp
+2. ⏳ Add synthetic audio file loading (if config.use_synthetic_audio)
+3. ⏳ Copy Whisper integration from test_word_timestamps.cpp
+4. ⏳ Copy diarization from test_frame_voting.cpp
+5. ⏳ Wire everything together in processing_loop()
+6. ⏳ Test with Sean Carroll podcast audio
+7. ⏳ Test with live microphone input
+
+**Phase 6.2: Additional Features** (1 day)
 
 **Tasks:**
 

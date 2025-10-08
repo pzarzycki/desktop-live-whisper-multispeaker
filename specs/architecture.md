@@ -94,6 +94,40 @@ if (should_transcribe_based_on_new_logic) {  // New VAD
 
 ---
 
+## GUI Framework Decision
+
+### Attempted: Qt6
+**Reason for trial:** Cross-platform, mature ecosystem, good tooling, widely used
+
+**Why rejected:**
+- **LGPL Licensing Issue**: Requires applications to provide re-linking mechanism (users must be able to replace Qt libraries)
+- **Commercial Incompatibility**: Not compatible with closed-source commercial distribution without complex legal compliance
+- **Commercial License Cost**: ~$5,000+/year per developer (too expensive for project)
+- **Distribution Size**: ~20MB of DLL dependencies
+- **Build Complexity**: Separate meta-object compiler (moc), special build system integration
+
+### Chosen: Dear ImGui
+**License:** MIT (fully permissive, commercial-friendly, no restrictions)
+
+**Advantages:**
+- ✅ **Zero licensing concerns** - MIT allows any use including commercial closed-source
+- ✅ **Tiny footprint** - ~30KB compiled (vs Qt's 20MB DLLs, 97% reduction)
+- ✅ **Source-only** - No installation, managed via git submodule
+- ✅ **Simple API** - Immediate mode, all C++, no separate UI language
+- ✅ **Platform native rendering** - DirectX 11 (Windows), Metal (macOS)
+- ✅ **Easy integration** - Drop-in to existing C++ codebase
+
+**Platform Architecture:**
+- **Windows**: `src/ui/main_windows.cpp` - WinMain + DirectX 11 + Win32 backend
+- **macOS**: `src/ui/main_macos.mm` - NSApplication + Metal + Cocoa backend  
+- **Shared UI Logic**: `src/ui/app_window.hpp/cpp` - 100% platform-independent (no OS headers)
+
+**Font Quality:** TrueType Segoe UI loaded with DPI awareness for crisp rendering on all displays
+
+**Result:** Production-ready GUI with zero licensing risk, minimal distribution size, clean separation of platform-specific and shared code.
+
+---
+
 ## Threading Model for Real-Time Audio Processing
 
 ### Design Goals
