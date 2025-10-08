@@ -60,16 +60,33 @@ Real-time transcription with speaker diarization using Whisper and CAMPlus embed
 
 ## Prerequisites (Windows)
 
+### Core Build Tools
+
 - CMake 3.24+
 - A C++ toolchain. Either:
   - Visual Studio 2022 with "Desktop development with C++" workload, or
   - Visual Studio 2022 Build Tools with MSVC and Windows SDK
 - Windows 10/11 SDK (provides the Universal CRT headers like `ucrt\math.h`, `rc.exe`, `mt.exe`)
 - Optional: Ninja (faster single-config builds)
-- Qt 6 will be pulled via vcpkg later; for now, tests can build without Qt.
 
-Notes:
-- The full app presets assume a local `vcpkg/` checkout at `${repo}/vcpkg`. We'll wire this in a later step; for now use the tests-only presets that do not require vcpkg/Qt.
+### Qt 6 (Required for GUI Application)
+
+**Download:** Visit [www.qt.io/download-qt-installer](https://www.qt.io/download-qt-installer) and download the Qt Online Installer.
+
+**Quick Setup:**
+1. Run `qt-unified-windows-x64-online.exe`
+2. Select Qt 6.8.0 → MSVC 2022 64-bit + Qt Quick
+3. Install to `C:\Qt` (default)
+
+**Or Automated CLI:**
+```powershell
+# From Downloads folder after downloading installer
+.\qt-unified-windows-x64-online.exe --root C:\Qt --accept-licenses --default-answer --confirm-command install qt.qt6.680.win64_msvc2022_64 qt.qt6.680.addons.qtdeclarative
+```
+
+**Full Instructions:** See [docs/QUICK_START_GUI.md](docs/QUICK_START_GUI.md) for step-by-step installation and [docs/qt_setup.md](docs/qt_setup.md) for detailed configuration.
+
+**Note:** Tests can build without Qt (use `tests-only-*` presets). GUI app requires Qt 6 with QML/Quick support.
 
 
 

@@ -887,13 +887,83 @@ For each Whisper segment:
 ✅ GUI-framework agnostic (works with Qt, Win32, etc.)
 ✅ Production-ready design patterns
 
-**Next Steps:** Complete wiring to transcription engine, then start GUI development
+**Next Steps:** See NEXT_AGENT_START_HERE.md for detailed wiring instructions
 
 ---
 
-## Phase 5: Integration & Polish - NEXT
+## Phase 5: GUI Development - IN PROGRESS 🎯
 
-### Objective: Wire controller to engine, polish for production
+### FRAMEWORK CHANGE: Qt6 → Dear ImGui
+
+**Reason:** Qt6 LGPL licensing not suitable for commercial closed-source software
+**New Choice:** Dear ImGui (MIT license - fully commercial-friendly!)
+
+**Advantages:**
+- ✅ **MIT License** - no commercial restrictions, no LGPL obligations
+- ✅ **Tiny Size** - 30 KB vs Qt's 20 MB DLLs
+- ✅ **Simple API** - immediate mode, all C++, no separate UI language
+- ✅ **No Installation** - just source files in project (git submodule)
+- ✅ **Single Executable** - static linking, no runtime dependencies
+- ✅ **Cross-Platform** - Windows (DirectX), macOS (Metal), Linux (OpenGL)
+
+**Design:** Original concepts from `specs/gui_design.md` still valid (dark theme, colors, layout)
+
+**Implementation Status:** Code complete, ready to test!
+
+**Phase 5.1: ImGui GUI** (1-2 days) - CURRENT ✅
+
+**Files Created:**
+- `third_party/imgui/` - Dear ImGui library (git submodule added)
+- `src/ui/app_window.hpp` - Main window class (70 lines)
+- `src/ui/app_window.cpp` - Window implementation (270 lines)
+- `src/ui/main_imgui.cpp` - Windows entry point with DirectX11 (210 lines)
+- Updated `CMakeLists.txt` - ImGui build configuration (no Qt dependency!)
+
+**Features Implemented:**
+- ✅ Dark theme matching original design
+- ✅ Large START/STOP button (colored, state-based)
+- ✅ Scrollable transcript with speaker colors
+- ✅ Speaker indicators ([S0], [S1]) with color coding
+- ✅ Settings panel (synthetic audio, model, speakers, threshold)
+- ✅ Status bar (elapsed time, chunk count, reclassifications)
+- ✅ Event integration with TranscriptionController
+- ✅ Auto-scroll transcript
+- ✅ Confidence warnings for low-confidence chunks
+
+**Next Steps:**
+1. ⏳ Build with `BUILD_APP=ON` (no external dependencies needed!)
+2. ⏳ Test UI rendering
+3. ⏳ Verify start/stop functionality
+4. ⏳ Add synthetic audio support to controller config
+
+**Phase 5.2: Speaker Statistics** (1 day)
+- Add speaker time tracking to API
+- Create SpeakerStatsPanel.qml
+- Wire up real-time updates
+- Display total time and percentages
+
+**Phase 5.3: Settings & Polish** (1-2 days)
+- Create SettingsPanel.qml
+- Wire up model/threshold/device selection
+- Add keyboard shortcuts (Ctrl+R, etc.)
+- Add copy-to-clipboard
+- Smooth animations and transitions
+
+**Phase 5.4: Testing & Packaging** (1 day)
+- Test on Windows
+- Test on macOS
+- Create installer/package
+- Write user documentation
+
+**Estimated Timeline:** 5-7 days total
+
+**Current Status:** Design complete, ready to implement TranscriptionBridge
+
+---
+
+## Phase 6: Engine Integration - NEXT
+
+### Objective: Wire controller to transcription engine
 
 **Tasks:**
 

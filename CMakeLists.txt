@@ -6,55 +6,84 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # Default to console-only build; UI can be enabled explicitly later
-option(BUILD_APP "Build the full Qt application and libraries" OFF)
+option(BUILD_APP "Build the GUI application with Dear ImGui" OFF)
 
 # Disable tests by default; enable when you want them
 set(BUILD_TESTING OFF CACHE BOOL "Enable CTest and test targets")
 include(CTest)
 
 if(BUILD_APP)
-    find_package(Qt6 REQUIRED COMPONENTS Core Gui Qml Quick)
+    # Dear ImGui library (MIT licensed, commercial-friendly!)
+    add_library(imgui STATIC
+        third_party/imgui/imgui.cpp
+        third_party/imgui/imgui_draw.cpp
+        third_party/imgui/imgui_tables.cpp
+        third_party/imgui/imgui_widgets.cpp
+        third_party/imgui/imgui_demo.cpp
+    )
+    target_include_directories(imgui PUBLIC third_party/imgui)
 
+    # Platform-specific backends
+    if(WIN32)
+        target_sources(imgui PRIVATE
+            third_party/imgui/backends/imgui_impl_win32.cpp
+            third_party/imgui/backends/imgui_impl_dx11.cpp
+        )
+        target_include_directories(imgui PUBLIC third_party/imgui/backends)
+        target_link_libraries(imgui PUBLIC d3d11 dxgi d3dcompiler)
+    endif()
+
+    if(APPLE)
+        target_sources(imgui PRIVATE
+            third_party/imgui/backends/imgui_impl_osx.mm
+            third_party/imgui/backends/imgui_impl_metal.mm
+        )
+        target_include_directories(imgui PUBLIC third_party/imgui/backends)
+        target_link_libraries(imgui PUBLIC 
+            "-framework Metal" 
+            "-framework MetalKit" 
+            "-framework Cocoa"
+            "-framework QuartzCore"
+        )
+    endif()
+
+    # Core library (no Qt dependency)
     add_library(core_lib
         src/core/logging.cpp
         src/core/config.cpp
     )
     target_include_directories(core_lib PUBLIC src)
-    target_link_libraries(core_lib PUBLIC Qt6::Core)
 
+    # Audio library (Windows WASAPI)
     add_library(audio_windows STATIC
         src/audio/windows_wasapi.cpp
     )
     target_include_directories(audio_windows PUBLIC src)
-    target_link_libraries(audio_windows PUBLIC core_lib Qt6::Core)
+    target_link_libraries(audio_windows PUBLIC core_lib)
 
+    # ASR library (Whisper backend)
     add_library(asr_whisper STATIC
         src/asr/whisper_backend.cpp
     )
     target_include_directories(asr_whisper PUBLIC src)
-    target_link_libraries(asr_whisper PUBLIC core_lib Qt6::Core)
-    # Whisper linking for UI build can be added when BUILD_APP is used
+    target_link_libraries(asr_whisper PUBLIC core_lib)
 
-    # Diarization omitted in simplified build
-
-    qt_standard_project_setup(REQUIRES 6.6)
-
-    qt_add_executable(app_desktop_whisper
-        src/ui/main.cpp
+    # GUI application with ImGui
+    add_executable(app_desktop_whisper WIN32
+        src/ui/main_imgui.cpp
+        src/ui/app_window.cpp
     )
     target_link_libraries(app_desktop_whisper PRIVATE
-        Qt6::Core Qt6::Gui Qt6::Qml Qt6::Quick
-        core_lib audio_windows asr_whisper
+        imgui
+        core_lib
+        audio_windows
+        asr_whisper
+        app_controller
     )
-    if (WIN32 AND MSVC)
+    
+    if(WIN32 AND MSVC)
         target_link_libraries(app_desktop_whisper PRIVATE ole32 uuid)
     endif()
-
-    qt_add_qml_module(app_desktop_whisper
-        URI App
-        VERSION 1.0
-        QML_FILES src/ui/qml/Main.qml
-    )
 
     install(TARGETS app_desktop_whisper)
 endif()
