@@ -1,11 +1,13 @@
 
 ## VS Build Tools ENV in PowerShell
 
-There's a ready script to activate dev variables for currently installed VS Build Tools: `${workspace}\Enter-VSDev.ps1`. Just run it once in the new PowerShell session, if needed.
+There's a ready script to activate dev variables for currently installed VS Build Tools: `${workspace}\Enter-VSDev.ps1`. Just run it once in the new PowerShell session, if needed. Just once!
 
 ## Git Commands
 
 Use git, but never **push** to remote server without User explicit consent.
+ALWAYS TEST THE SOLUTION before commiting a new version. Especially before pushing anything up.
+
 
 ## Project Documentation
 

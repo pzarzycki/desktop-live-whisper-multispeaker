@@ -169,6 +169,15 @@ if(NOT BUILD_APP)
     target_compile_features(test_word_timestamps PRIVATE cxx_std_20)
     target_include_directories(test_word_timestamps PRIVATE src)
     target_link_libraries(test_word_timestamps PRIVATE asr_whisper audio_windows)
+
+    # Test application for word-level speaker mapping (Phase 3 Step 2)
+    add_executable(test_word_speaker_mapping
+        apps/test_word_speaker_mapping.cpp
+        src/audio/file_capture.cpp
+    )
+    target_compile_features(test_word_speaker_mapping PRIVATE cxx_std_20)
+    target_include_directories(test_word_speaker_mapping PRIVATE src)
+    target_link_libraries(test_word_speaker_mapping PRIVATE asr_whisper audio_windows diarization)
 endif()
 
 

@@ -106,7 +106,7 @@ public:
         int window_ms = 1000;   // Use 1s window for each embedding
         int history_sec = 60;   // Keep last 60 seconds of frames
         EmbeddingMode embedding_mode = EmbeddingMode::NeuralONNX;  // Use neural embeddings
-        std::string onnx_model_path = "models/speaker_embedding.onnx";
+        std::string onnx_model_path = "models/campplus_voxceleb.onnx";  // CAMPlus (better than WeSpeaker)
         bool verbose = false;
     };
     

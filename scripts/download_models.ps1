@@ -3,26 +3,27 @@
 .SYNOPSIS
     Download required models for desktop-live-whisper
 .DESCRIPTION
-    Downloads Whisper models and speaker embedding models to the models/ directory.
-    Models are large files (75-465 MB each) and are not included in git.
+    Downloads ALL required models: Whisper (tiny + base) and speaker models (WeSpeaker + CAMPlus).
+    Models are large files and are not included in git.
+    By default, downloads all models needed for the project.
 .PARAMETER WhisperModel
-    Which Whisper model to download: tiny, base, small (default: tiny)
+    Optional: Download only specific Whisper model (tiny, base, small)
 .PARAMETER SpeakerModel
-    Which speaker embedding model to download: wespeaker, campplus (default: wespeaker)
+    Optional: Download only specific speaker model (wespeaker, campplus)
 .EXAMPLE
     .\scripts\download_models.ps1
-    Downloads tiny.en Whisper model and WeSpeaker ResNet34
+    Downloads ALL required models (recommended)
 .EXAMPLE
     .\scripts\download_models.ps1 -WhisperModel base
-    Downloads base.en Whisper model
+    Downloads only base.en Whisper model
 #>
 
 param(
-    [ValidateSet("tiny", "base", "small")]
-    [string]$WhisperModel = "tiny",
+    [ValidateSet("tiny", "base", "small", "all")]
+    [string]$WhisperModel = "all",
     
-    [ValidateSet("wespeaker", "campplus")]
-    [string]$SpeakerModel = "wespeaker"
+    [ValidateSet("wespeaker", "campplus", "all")]
+    [string]$SpeakerModel = "all"
 )
 
 # Color output helpers
@@ -73,10 +74,10 @@ $speakerModels = @{
         description = "WeSpeaker ResNet34 (current)"
     }
     "campplus" = @{
-        url = "https://huggingface.co/Wespeaker/wespeaker-voxceleb-campplus/resolve/main/campplus_voxceleb.onnx"
+        url = "https://huggingface.co/Wespeaker/wespeaker-voxceleb-campplus/resolve/main/voxceleb_CAM%2B%2B.onnx"
         filename = "campplus_voxceleb.onnx"
-        size = "7 MB"
-        description = "CAMPlus (experimental, may be better)"
+        size = "28 MB"
+        description = "CAMPlus (better than WeSpeaker, use threshold=0.35)"
     }
 }
 
@@ -144,27 +145,61 @@ function Download-File {
     }
 }
 
-# Download Whisper model
+# Download Whisper model(s)
 Write-Host "`n--- Whisper Model ---" -ForegroundColor Yellow
-$whisperInfo = $whisperModels[$WhisperModel]
-Write-Info "Model: $($whisperInfo.filename)"
-Write-Info "Size: $($whisperInfo.size)"
-Write-Info "Description: $($whisperInfo.description)"
+$whisperSuccess = $true
+if ($WhisperModel -eq "all") {
+    Write-Info "Downloading ALL Whisper models: tiny, base"
+    foreach ($modelName in @("tiny", "base")) {
+        $whisperInfo = $whisperModels[$modelName]
+        Write-Host "`n  $modelName model:" -ForegroundColor Cyan
+        Write-Info "  - File: $($whisperInfo.filename)"
+        Write-Info "  - Size: $($whisperInfo.size)"
+        Write-Info "  - Description: $($whisperInfo.description)"
+        
+        $whisperPath = Join-Path $modelsDir $whisperInfo.filename
+        $result = Download-File -Url $whisperInfo.url -OutputPath $whisperPath `
+            -Description "Whisper $modelName model"
+        $whisperSuccess = $whisperSuccess -and $result
+    }
+} else {
+    $whisperInfo = $whisperModels[$WhisperModel]
+    Write-Info "Model: $($whisperInfo.filename)"
+    Write-Info "Size: $($whisperInfo.size)"
+    Write-Info "Description: $($whisperInfo.description)"
+    
+    $whisperPath = Join-Path $modelsDir $whisperInfo.filename
+    $whisperSuccess = Download-File -Url $whisperInfo.url -OutputPath $whisperPath `
+        -Description "Whisper $WhisperModel model"
+}
 
-$whisperPath = Join-Path $modelsDir $whisperInfo.filename
-$whisperSuccess = Download-File -Url $whisperInfo.url -OutputPath $whisperPath `
-    -Description "Whisper $WhisperModel model"
-
-# Download Speaker model
+# Download Speaker model(s)
 Write-Host "`n--- Speaker Embedding Model ---" -ForegroundColor Yellow
-$speakerInfo = $speakerModels[$SpeakerModel]
-Write-Info "Model: $($speakerInfo.filename)"
-Write-Info "Size: $($speakerInfo.size)"
-Write-Info "Description: $($speakerInfo.description)"
-
-$speakerPath = Join-Path $modelsDir $speakerInfo.filename
-$speakerSuccess = Download-File -Url $speakerInfo.url -OutputPath $speakerPath `
-    -Description "Speaker $SpeakerModel model"
+$speakerSuccess = $true
+if ($SpeakerModel -eq "all") {
+    Write-Info "Downloading ALL Speaker models: wespeaker, campplus"
+    foreach ($modelName in @("wespeaker", "campplus")) {
+        $speakerInfo = $speakerModels[$modelName]
+        Write-Host "`n  $modelName model:" -ForegroundColor Cyan
+        Write-Info "  - File: $($speakerInfo.filename)"
+        Write-Info "  - Size: $($speakerInfo.size)"
+        Write-Info "  - Description: $($speakerInfo.description)"
+        
+        $speakerPath = Join-Path $modelsDir $speakerInfo.filename
+        $result = Download-File -Url $speakerInfo.url -OutputPath $speakerPath `
+            -Description "Speaker $modelName model"
+        $speakerSuccess = $speakerSuccess -and $result
+    }
+} else {
+    $speakerInfo = $speakerModels[$SpeakerModel]
+    Write-Info "Model: $($speakerInfo.filename)"
+    Write-Info "Size: $($speakerInfo.size)"
+    Write-Info "Description: $($speakerInfo.description)"
+    
+    $speakerPath = Join-Path $modelsDir $speakerInfo.filename
+    $speakerSuccess = Download-File -Url $speakerInfo.url -OutputPath $speakerPath `
+        -Description "Speaker $SpeakerModel model"
+}
 
 # Summary
 Write-Host "`n============================================================" -ForegroundColor Cyan

@@ -9,13 +9,13 @@
 #   ./scripts/download_models.sh [whisper_model] [speaker_model]
 #
 # Arguments:
-#   whisper_model: tiny, base, or small (default: tiny)
-#   speaker_model: wespeaker or campplus (default: wespeaker)
+#   whisper_model: tiny, base, small, or all (default: all)
+#   speaker_model: wespeaker, campplus, or all (default: all)
 #
 # Examples:
-#   ./scripts/download_models.sh
-#   ./scripts/download_models.sh base
-#   ./scripts/download_models.sh tiny campplus
+#   ./scripts/download_models.sh              # Download all models (recommended)
+#   ./scripts/download_models.sh base         # Download base whisper + all speakers
+#   ./scripts/download_models.sh tiny campplus # Download tiny whisper + campplus only
 #
 
 set -e  # Exit on error
@@ -44,19 +44,19 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 MODELS_DIR="$PROJECT_ROOT/models"
 
 # Parse arguments
-WHISPER_MODEL="${1:-tiny}"
-SPEAKER_MODEL="${2:-wespeaker}"
+WHISPER_MODEL="${1:-all}"
+SPEAKER_MODEL="${2:-all}"
 
 # Validate arguments
-if [[ ! "$WHISPER_MODEL" =~ ^(tiny|base|small)$ ]]; then
+if [[ ! "$WHISPER_MODEL" =~ ^(tiny|base|small|all)$ ]]; then
     print_error "Invalid whisper model: $WHISPER_MODEL"
-    echo "Valid options: tiny, base, small"
+    echo "Valid options: tiny, base, small, all"
     exit 1
 fi
 
-if [[ ! "$SPEAKER_MODEL" =~ ^(wespeaker|campplus)$ ]]; then
+if [[ ! "$SPEAKER_MODEL" =~ ^(wespeaker|campplus|all)$ ]]; then
     print_error "Invalid speaker model: $SPEAKER_MODEL"
-    echo "Valid options: wespeaker, campplus"
+    echo "Valid options: wespeaker, campplus, all"
     exit 1
 fi
 
@@ -94,7 +94,7 @@ declare -A WHISPER_DESCRIPTIONS=(
 # Speaker model configurations
 declare -A SPEAKER_URLS=(
     ["wespeaker"]="https://huggingface.co/Wespeaker/wespeaker-voxceleb-resnet34/resolve/main/voxceleb_resnet34.onnx"
-    ["campplus"]="https://huggingface.co/Wespeaker/wespeaker-voxceleb-campplus/resolve/main/campplus_voxceleb.onnx"
+    ["campplus"]="https://huggingface.co/Wespeaker/wespeaker-voxceleb-campplus/resolve/main/voxceleb_CAM%2B%2B.onnx"
 )
 
 declare -A SPEAKER_FILENAMES=(
@@ -104,12 +104,12 @@ declare -A SPEAKER_FILENAMES=(
 
 declare -A SPEAKER_SIZES=(
     ["wespeaker"]="25 MB"
-    ["campplus"]="7 MB"
+    ["campplus"]="28 MB"
 )
 
 declare -A SPEAKER_DESCRIPTIONS=(
-    ["wespeaker"]="WeSpeaker ResNet34 (current)"
-    ["campplus"]="CAMPlus (experimental, may be better)"
+    ["wespeaker"]="WeSpeaker ResNet34 (threshold=0.50)"
+    ["campplus"]="CAMPlus (better than WeSpeaker, threshold=0.35)"
 )
 
 # Function to download file
@@ -158,42 +158,84 @@ download_file() {
     fi
 }
 
-# Download Whisper model
+# Download Whisper model(s)
 echo ""
 print_warning "--- Whisper Model ---"
-WHISPER_URL="${WHISPER_URLS[$WHISPER_MODEL]}"
-WHISPER_FILENAME="${WHISPER_FILENAMES[$WHISPER_MODEL]}"
-WHISPER_SIZE="${WHISPER_SIZES[$WHISPER_MODEL]}"
-WHISPER_DESC="${WHISPER_DESCRIPTIONS[$WHISPER_MODEL]}"
+WHISPER_SUCCESS=true
 
-print_info "Model: $WHISPER_FILENAME"
-print_info "Size: $WHISPER_SIZE"
-print_info "Description: $WHISPER_DESC"
-
-WHISPER_PATH="$MODELS_DIR/$WHISPER_FILENAME"
-if download_file "$WHISPER_URL" "$WHISPER_PATH" "Whisper $WHISPER_MODEL model"; then
-    WHISPER_SUCCESS=true
+if [ "$WHISPER_MODEL" = "all" ]; then
+    print_info "Downloading ALL Whisper models: tiny, base"
+    for model in tiny base; do
+        echo ""
+        print_info "  $model model:"
+        WHISPER_URL="${WHISPER_URLS[$model]}"
+        WHISPER_FILENAME="${WHISPER_FILENAMES[$model]}"
+        WHISPER_SIZE="${WHISPER_SIZES[$model]}"
+        WHISPER_DESC="${WHISPER_DESCRIPTIONS[$model]}"
+        
+        print_info "  - File: $WHISPER_FILENAME"
+        print_info "  - Size: $WHISPER_SIZE"
+        print_info "  - Description: $WHISPER_DESC"
+        
+        WHISPER_PATH="$MODELS_DIR/$WHISPER_FILENAME"
+        if ! download_file "$WHISPER_URL" "$WHISPER_PATH" "Whisper $model model"; then
+            WHISPER_SUCCESS=false
+        fi
+    done
 else
-    WHISPER_SUCCESS=false
+    WHISPER_URL="${WHISPER_URLS[$WHISPER_MODEL]}"
+    WHISPER_FILENAME="${WHISPER_FILENAMES[$WHISPER_MODEL]}"
+    WHISPER_SIZE="${WHISPER_SIZES[$WHISPER_MODEL]}"
+    WHISPER_DESC="${WHISPER_DESCRIPTIONS[$WHISPER_MODEL]}"
+    
+    print_info "Model: $WHISPER_FILENAME"
+    print_info "Size: $WHISPER_SIZE"
+    print_info "Description: $WHISPER_DESC"
+    
+    WHISPER_PATH="$MODELS_DIR/$WHISPER_FILENAME"
+    if ! download_file "$WHISPER_URL" "$WHISPER_PATH" "Whisper $WHISPER_MODEL model"; then
+        WHISPER_SUCCESS=false
+    fi
 fi
 
-# Download Speaker model
+# Download Speaker model(s)
 echo ""
 print_warning "--- Speaker Embedding Model ---"
-SPEAKER_URL="${SPEAKER_URLS[$SPEAKER_MODEL]}"
-SPEAKER_FILENAME="${SPEAKER_FILENAMES[$SPEAKER_MODEL]}"
-SPEAKER_SIZE="${SPEAKER_SIZES[$SPEAKER_MODEL]}"
-SPEAKER_DESC="${SPEAKER_DESCRIPTIONS[$SPEAKER_MODEL]}"
+SPEAKER_SUCCESS=true
 
-print_info "Model: $SPEAKER_FILENAME"
-print_info "Size: $SPEAKER_SIZE"
-print_info "Description: $SPEAKER_DESC"
-
-SPEAKER_PATH="$MODELS_DIR/$SPEAKER_FILENAME"
-if download_file "$SPEAKER_URL" "$SPEAKER_PATH" "Speaker $SPEAKER_MODEL model"; then
-    SPEAKER_SUCCESS=true
+if [ "$SPEAKER_MODEL" = "all" ]; then
+    print_info "Downloading ALL Speaker models: wespeaker, campplus"
+    for model in wespeaker campplus; do
+        echo ""
+        print_info "  $model model:"
+        SPEAKER_URL="${SPEAKER_URLS[$model]}"
+        SPEAKER_FILENAME="${SPEAKER_FILENAMES[$model]}"
+        SPEAKER_SIZE="${SPEAKER_SIZES[$model]}"
+        SPEAKER_DESC="${SPEAKER_DESCRIPTIONS[$model]}"
+        
+        print_info "  - File: $SPEAKER_FILENAME"
+        print_info "  - Size: $SPEAKER_SIZE"
+        print_info "  - Description: $SPEAKER_DESC"
+        
+        SPEAKER_PATH="$MODELS_DIR/$SPEAKER_FILENAME"
+        if ! download_file "$SPEAKER_URL" "$SPEAKER_PATH" "Speaker $model model"; then
+            SPEAKER_SUCCESS=false
+        fi
+    done
 else
-    SPEAKER_SUCCESS=false
+    SPEAKER_URL="${SPEAKER_URLS[$SPEAKER_MODEL]}"
+    SPEAKER_FILENAME="${SPEAKER_FILENAMES[$SPEAKER_MODEL]}"
+    SPEAKER_SIZE="${SPEAKER_SIZES[$SPEAKER_MODEL]}"
+    SPEAKER_DESC="${SPEAKER_DESCRIPTIONS[$SPEAKER_MODEL]}"
+    
+    print_info "Model: $SPEAKER_FILENAME"
+    print_info "Size: $SPEAKER_SIZE"
+    print_info "Description: $SPEAKER_DESC"
+    
+    SPEAKER_PATH="$MODELS_DIR/$SPEAKER_FILENAME"
+    if ! download_file "$SPEAKER_URL" "$SPEAKER_PATH" "Speaker $SPEAKER_MODEL model"; then
+        SPEAKER_SUCCESS=false
+    fi
 fi
 
 # Summary

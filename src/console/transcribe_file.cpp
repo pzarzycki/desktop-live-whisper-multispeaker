@@ -502,7 +502,7 @@ int main(int argc, char** argv) {
             };
             
             if (frame_analyzer.frame_count() > 0) {
-                frame_analyzer.cluster_frames(2, 0.50f);  // max_speakers=2, threshold=0.50
+                frame_analyzer.cluster_frames(2, 0.35f);  // max_speakers=2, threshold=0.35 (CAMPlus optimal)
                 
                 fprintf(stderr, "[Phase2] Reassigning speakers to %zu segments...\n", segments.size());
                 
