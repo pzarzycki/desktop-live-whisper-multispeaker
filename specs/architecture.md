@@ -1,10 +1,52 @@
 # Architecture Documentation
 
-**Central Hub:** This document describes the complete system architecture. See the [Documentation Index](#documentation-index) at the bottom for related documents.
+**Central Hub:** This document describes the complete system architecture and serves as the index to all technical documentation.
+
+**Current Status:** Phase 6 Complete - Production-ready async streaming transcription with speaker diarization
+
+**Quick Navigation:**
+- For current project status → See [`plan.md`](plan.md)
+- For latest completion details → See [`phase6_completion.md`](phase6_completion.md)
+- For component specifics → Use [Document Index](#documentation-index) below
 
 ---
 
-## 🚨 CRITICAL: WHISPER SEGMENTATION MUST NOT BE MODIFIED 🚨
+## Table of Contents
+
+1. [System Overview](#system-overview)
+2. [Critical Design Constraints](#critical-design-constraints)
+3. [Core Architecture](#core-architecture)
+4. [Performance & Benchmarks](#performance--benchmarks)
+5. [Documentation Index](#documentation-index)
+
+---
+
+## System Overview
+
+**Desktop Live Whisper** is a real-time speech transcription system with speaker diarization for Windows and macOS.
+
+### Key Capabilities
+
+- ✅ Real-time transcription (Whisper tiny.en, 0.87x RTF)
+- ✅ Async streaming architecture (zero audio stuttering)
+- ✅ Speaker diarization (frame voting, production-ready)
+- ✅ Low latency (~4 seconds to first output)
+- ✅ Multiplatform (Windows complete, macOS in progress)
+
+### Technology Stack
+
+| Component | Technology | Status |
+|-----------|-----------|--------|
+| **ASR** | Whisper tiny.en (75MB) | ✅ Production |
+| **Speaker Embeddings** | WeSpeaker ResNet34 ONNX | ✅ Production |
+| **Audio Capture** | WASAPI (Windows) | ✅ Production |
+| **GUI Framework** | Dear ImGui + DirectX 11 | ✅ Production |
+| **Build System** | CMake 3.24+ | ✅ Working |
+| **License** | MIT (ImGui) | ✅ Commercial-friendly |
+
+---
+
+## Critical Design Constraints
 
 ### Empirical Finding (2025-10-07)
 
@@ -970,52 +1012,94 @@ Total Peak RAM           ~320 MB
 - Output: [batch=1, 256] float32 (L2-normalized embeddings)
 - Source: https://github.com/wenet-e2e/wespeaker
 
-#### Detailed References
-
-See comprehensive documentation:
-- `specs/diarization.md` - Complete diarization knowledge base
-- `specs/transcription.md` - Whisper ASR learnings and best practices
-- `specs/continuous_architecture_findings.md` - Detailed experiment logs
-- `specs/phase2c_final_summary.md` - Phase 2c complete technical report
-
 ---
 
 ## Documentation Index
 
-### Core Architecture Documents (Start Here)
-- **[architecture.md](architecture.md)** (this file) - Complete system architecture overview
-- **[plan.md](plan.md)** - Project status, phases, and progress tracking
-- **[phase6_completion.md](phase6_completion.md)** - Phase 6 async architecture details
+**How to use this index:** This section organizes all technical documentation by category. Start with Core Documents, then explore specific topics as needed.
 
-### Component-Specific Documentation
-- **[transcription.md](transcription.md)** - Whisper ASR integration and best practices
-- **[diarization.md](diarization.md)** - Speaker identification system details
-- **[application_api_design.md](application_api_design.md)** - TranscriptionController API
-- **[continuous_architecture_findings.md](continuous_architecture_findings.md)** - Experimental findings
+### 📘 Core Documents (Essential Reading)
 
-### Phase Reports (Historical)
-- **[phase3_report.md](phase3_report.md)** - Phase 3: Frame voting speaker diarization
-- **[phase4_application_api_summary.md](phase4_application_api_summary.md)** - Phase 4: Controller API
-- **[phase5_gui_implementation_log.md](phase5_gui_implementation_log.md)** - Phase 5: GUI with ImGui
+| Document | Purpose | When to Read |
+|----------|---------|--------------|
+| **[plan.md](plan.md)** | Project status, current phase, progress tracking | First - understand where we are |
+| **[architecture.md](architecture.md)** | System architecture overview (this file) | Second - understand the system |
+| **[phase6_completion.md](phase6_completion.md)** | Latest major completion (async streaming) | Third - understand recent changes |
 
-### Streaming & Performance
-- **[STREAMING_STRATEGY.md](STREAMING_STRATEGY.md)** - Hold-and-emit streaming strategy
-- **[STREAMING_SUCCESS.md](STREAMING_SUCCESS.md)** - Streaming implementation validation
-- **[CIRCULAR_BUFFER_PROPOSAL.md](CIRCULAR_BUFFER_PROPOSAL.md)** - Buffer design exploration
+### 🔧 Component Documentation (Deep Dives)
 
-### Models & Configuration
-- **[MODELS.md](MODELS.md)** - Model files and download information
-- **[speaker_models_onnx.md](speaker_models_onnx.md)** - ONNX speaker embedding models
-- **[speaker_identification_analysis.md](speaker_identification_analysis.md)** - Speaker ID research
+| Document | Coverage | Key Topics |
+|----------|----------|------------|
+| **[transcription.md](transcription.md)** | Whisper ASR integration | Segmentation strategy, models, performance |
+| **[diarization.md](diarization.md)** | Speaker identification system | Frame extraction, embeddings, clustering |
+| **[application_api_design.md](application_api_design.md)** | TranscriptionController API | Event-driven design, configuration, usage |
+| **[continuous_architecture_findings.md](continuous_architecture_findings.md)** | Experimental approaches tested | Failed experiments, lessons learned |
 
-### Platform & Organization
-- **[platform_separation.md](platform_separation.md)** - Multiplatform code organization (Windows/macOS)
-- **[README.md](README.md)** - Specs folder overview and navigation guide
+### 📊 Phase Reports (Historical Progress)
 
-### For New Contributors
-Start with:
-1. **[NEXT_AGENT_START_HERE.md](NEXT_AGENT_START_HERE.md)** - Onboarding guide
-2. **[plan.md](plan.md)** - Current status and next steps
-3. **[architecture.md](architecture.md)** - This file (system overview)
+**Phase 3:** Speaker Diarization Foundation
+- **[phase3_report.md](phase3_report.md)** - Frame voting approach, 75% accuracy on similar voices
+- Tested 6 approaches, selected segment-level frame voting
+
+**Phase 4:** Application API Design (archived - superseded by Phase 6)
+- **[phase4_application_api_summary.md](phase4_application_api_summary.md)** - Original controller skeleton design  
+- Note: Phase 6 implementation differs significantly (async vs stub)
+
+**Phase 5:** GUI Implementation (archived - not using Qt)
+- **[phase5_gui_implementation_log.md](phase5_gui_implementation_log.md)** - Qt/QML attempt
+- Note: Switched to ImGui (MIT license, see [GUI Framework Decision](#gui-framework-decision))
+
+**Phase 6:** Async Streaming Architecture (CURRENT)
+- **[phase6_completion.md](phase6_completion.md)** - Complete async redesign
+- Zero stuttering, 3s latency, production-ready
+
+### 🎯 Streaming Implementation
+
+| Document | Focus | Status |
+|----------|-------|--------|
+| **[STREAMING_STRATEGY.md](STREAMING_STRATEGY.md)** | Hold-and-emit strategy | ✅ Implemented |
+| **[STREAMING_SUCCESS.md](STREAMING_SUCCESS.md)** | Validation results | ✅ Verified |
+| **[CIRCULAR_BUFFER_PROPOSAL.md](CIRCULAR_BUFFER_PROPOSAL.md)** | Alternative approach with symmetric context | 💡 Proposed (not implemented) |
+
+**Key insight:** Hold-and-emit prevents re-transcription and preserves original text quality.
+
+### 🔬 Research & Analysis
+
+| Document | Topic | Outcome |
+|----------|-------|---------|
+| **[speaker_identification_analysis.md](speaker_identification_analysis.md)** | Embedding quality analysis, accuracy expectations | ✅ Model validated, 75-85% realistic |
+| **[speaker_models_onnx.md](speaker_models_onnx.md)** | ONNX model comparison | ✅ Selected WeSpeaker ResNet34 |
+
+### 📦 Setup & Configuration
+
+| Document | Content | Audience |
+|----------|---------|----------|
+| **[MODELS.md](MODELS.md)** | Model downloads, third-party libraries | Setup/deployment |
+| **[platform_separation.md](platform_separation.md)** | Windows vs macOS code organization | Developers |
+| **[README.md](README.md)** | Specs folder overview | New contributors |
+
+### 📁 Archived Documents
+
+Located in `specs/archive/`:
+- Phase 2 reports (superseded by Phase 3)
+- Phase 4/5 onboarding guides (outdated)
+- Experimental findings (kept for reference)
+
+---
+
+## Quick Reference: Where to Find Information
+
+**I want to...**  | **Read this document**
+---|---
+Understand current project status | [`plan.md`](plan.md)
+Understand the system architecture | [`architecture.md`](architecture.md) (this file)
+Learn about async streaming | [`phase6_completion.md`](phase6_completion.md)
+Understand Whisper integration | [`transcription.md`](transcription.md)
+Understand speaker diarization | [`diarization.md`](diarization.md)
+See why streaming works | [`STREAMING_STRATEGY.md`](STREAMING_STRATEGY.md)
+Download models | [`MODELS.md`](MODELS.md)
+Build on Windows vs macOS | [`platform_separation.md`](platform_separation.md)
+See why Qt was rejected | [GUI Framework Decision](#gui-framework-decision) (in this file)
+Understand TranscriptionController API | [`application_api_design.md`](application_api_design.md)
 
 
