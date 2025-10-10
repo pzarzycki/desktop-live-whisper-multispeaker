@@ -1,0 +1,311 @@
+[init] app_transcribe_file starting; argc=5, cwd=C:\PRJ\VAM\desktop-live-whisper-multiplatform
+[input] file: test_data\Sean_Carroll_podcast.wav, sr=44100, ch=2, bps=16, dur~30.9058s
+[play] output enabled at 44100 Hz to default device
+[whisper] init from: models/ggml-tiny.en.bin
+whisper_init_from_file_with_params_no_state: loading model from 'models/ggml-tiny.en.bin'
+whisper_init_with_params_no_state: use gpu    = 0
+whisper_init_with_params_no_state: flash attn = 0
+whisper_init_with_params_no_state: gpu_device = 0
+whisper_init_with_params_no_state: dtw        = 0
+register_backend: registered backend BLAS (1 devices)
+register_device: registered device BLAS (OpenBLAS)
+register_backend: registered backend CPU (1 devices)
+register_device: registered device CPU (12th Gen Intel(R) Core(TM) i9-12900H)
+whisper_init_with_params_no_state: devices    = 2
+whisper_init_with_params_no_state: backends   = 2
+whisper_model_load: loading model
+whisper_model_load: n_vocab       = 51864
+whisper_model_load: n_audio_ctx   = 1500
+whisper_model_load: n_audio_state = 384
+whisper_model_load: n_audio_head  = 6
+whisper_model_load: n_audio_layer = 4
+whisper_model_load: n_text_ctx    = 448
+whisper_model_load: n_text_state  = 384
+whisper_model_load: n_text_head   = 6
+whisper_model_load: n_text_layer  = 4
+whisper_model_load: n_mels        = 80
+whisper_model_load: ftype         = 1
+whisper_model_load: qntvr         = 0
+whisper_model_load: type          = 1 (tiny)
+whisper_model_load: adding 1607 extra tokens
+whisper_model_load: n_langs       = 99
+whisper_model_load:      CPU total size =    77.11 MB
+whisper_model_load: model size    =   77.11 MB
+whisper_backend_init: using BLAS backend
+whisper_init_state: kv self size  =    3.15 MB
+whisper_init_state: kv cross size =    9.44 MB
+whisper_init_state: kv pad  size  =    2.36 MB
+ggml_gallocr_needs_realloc: graph has different number of nodes
+ggml_gallocr_alloc_graph: cannot reallocate multi buffer graph automatically, call reserve
+ggml_backend_sched_alloc_splits: failed to allocate graph, reserving (backend_ids_changed = 0)
+ggml_gallocr_reserve_n: reallocating CPU buffer from size 0.00 MiB to 11.08 MiB
+whisper_init_state: compute buffer (conv)   =   13.19 MB
+ggml_gallocr_needs_realloc: graph has different number of nodes
+ggml_gallocr_alloc_graph: cannot reallocate multi buffer graph automatically, call reserve
+ggml_backend_sched_alloc_splits: failed to allocate graph, reserving (backend_ids_changed = 0)
+ggml_gallocr_reserve_n: reallocating CPU buffer from size 0.00 MiB to 60.29 MiB
+whisper_init_state: compute buffer (encode) =   64.79 MB
+ggml_gallocr_needs_realloc: graph has different number of nodes
+ggml_gallocr_alloc_graph: cannot reallocate multi buffer graph automatically, call reserve
+ggml_backend_sched_alloc_splits: failed to allocate graph, reserving (backend_ids_changed = 0)
+ggml_gallocr_reserve_n: reallocating CPU buffer from size 0.00 MiB to 2.20 MiB
+whisper_init_state: compute buffer (cross)  =    3.88 MB
+ggml_gallocr_needs_realloc: graph has different number of nodes
+ggml_gallocr_alloc_graph: cannot reallocate multi buffer graph automatically, call reserve
+ggml_backend_sched_alloc_splits: failed to allocate graph, reserving (backend_ids_changed = 0)
+ggml_gallocr_reserve_n: reallocating CPU buffer from size 0.00 MiB to 89.95 MiB
+whisper_init_state: compute buffer (decode) =   95.89 MB
+[whisper] init OK: models/ggml-tiny.en.bin
+[whisper] system: AVX = 1 | AVX2 = 1 | AVX512 = 0 | FMA = 1 | NEON = 0 | ARM_FMA = 0 | F16C = 1 | FP16_VA = 0 | WASM_SIMD = 0 | SSE3 = 1 | SSSE3 = 1 | VSX = 0 | COREML = 0 | OPENVINO = 0 | 
+whisper_backend_init: using BLAS backend
+whisper_init_state: kv self size  =    3.15 MB
+whisper_init_state: kv cross size =    9.44 MB
+whisper_init_state: kv pad  size  =    2.36 MB
+ggml_gallocr_needs_realloc: graph has different number of nodes
+ggml_gallocr_alloc_graph: cannot reallocate multi buffer graph automatically, call reserve
+ggml_backend_sched_alloc_splits: failed to allocate graph, reserving (backend_ids_changed = 0)
+ggml_gallocr_reserve_n: reallocating CPU buffer from size 0.00 MiB to 11.08 MiB
+whisper_init_state: compute buffer (conv)   =   13.19 MB
+ggml_gallocr_needs_realloc: graph has different number of nodes
+ggml_gallocr_alloc_graph: cannot reallocate multi buffer graph automatically, call reserve
+ggml_backend_sched_alloc_splits: failed to allocate graph, reserving (backend_ids_changed = 0)
+ggml_gallocr_reserve_n: reallocating CPU buffer from size 0.00 MiB to 60.29 MiB
+whisper_init_state: compute buffer (encode) =   64.79 MB
+ggml_gallocr_needs_realloc: graph has different number of nodes
+ggml_gallocr_alloc_graph: cannot reallocate multi buffer graph automatically, call reserve
+ggml_backend_sched_alloc_splits: failed to allocate graph, reserving (backend_ids_changed = 0)
+ggml_gallocr_reserve_n: reallocating CPU buffer from size 0.00 MiB to 2.20 MiB
+whisper_init_state: compute buffer (cross)  =    3.88 MB
+ggml_gallocr_needs_realloc: graph has different number of nodes
+ggml_gallocr_alloc_graph: cannot reallocate multi buffer graph automatically, call reserve
+ggml_backend_sched_alloc_splits: failed to allocate graph, reserving (backend_ids_changed = 0)
+ggml_gallocr_reserve_n: reallocating CPU buffer from size 0.00 MiB to 89.95 MiB
+whisper_init_state: compute buffer (decode) =   95.89 MB
+Transcribing... press Ctrl+C to stop
+[save] recording resampled audio (Whisper input) to: output/whisper_input_16k.wav
+[ContinuousFrameAnalyzer] Init: hop=250ms, window=1000ms, history=60s, sr=16000, first_frame=500ms
+[Phase2] Frame analyzer: hop=250ms, window=1000ms
+[add_audio #1] n_samples=320, buffer_size=320, total_ms=20, next_frame=500
+.[add_audio #2] n_samples=320, buffer_size=640, total_ms=40, next_frame=500
+.[add_audio #3] n_samples=320, buffer_size=960, total_ms=60, next_frame=500
+.[add_audio #4] n_samples=320, buffer_size=1280, total_ms=80, next_frame=500
+.[add_audio #5] n_samples=320, buffer_size=1600, total_ms=100, next_frame=500
+.[add_audio #6] n_samples=320, buffer_size=1920, total_ms=120, next_frame=500
+.[add_audio #7] n_samples=320, buffer_size=2240, total_ms=140, next_frame=500
+.[add_audio #8] n_samples=320, buffer_size=2560, total_ms=160, next_frame=500
+.[add_audio #9] n_samples=320, buffer_size=2880, total_ms=180, next_frame=500
+.[add_audio #10] n_samples=320, buffer_size=3200, total_ms=200, next_frame=500
+........................................[window_check] next_frame=500, window=[0,1000], buffer=[0,1000], check=1
+[OnnxEmbedder] Initializing with model: models/campplus_voxceleb.onnx
+[OnnxEmbedder] Model loaded: 1 inputs, 1 outputs
+[OnnxEmbedder] Input name: feats
+[OnnxEmbedder] Output name: embs, embedding_dim: 512
+[OnnxEmbedder] Initialization complete (with Fbank extraction)
+[Frame] Initialized ONNX embedder: dim=512
+[Frame] t=500 ms, emb_dim=512
+[Frame] t=0 ms, emb_dim=512
+.............[window_check] next_frame=750, window=[250,1250], buffer=[0,1260], check=1
+[Frame] t=750 ms, emb_dim=512
+[Frame] t=250 ms, emb_dim=512
+............[window_check] next_frame=1000, window=[500,1500], buffer=[0,1500], check=1
+[Frame] t=1000 ms, emb_dim=512
+[Frame] t=500 ms, emb_dim=512
+.[whisper] running on samples=24000, threads=20
+[whisper] pcm_f32[0:5]=0,0,0,0,0
+[whisper] progress: 0%
+[00:00:00.000 --> 00:00:01.440]  [_BEG_] What to you is the most beautiful[_TT_72]
+[whisper] progress: 100%
+[whisper] segments=1
+
+whisper_print_timings:     load time =   229.43 ms
+whisper_print_timings:     fallbacks =   0 p /   0 h
+whisper_print_timings:      mel time =     0.00 ms
+whisper_print_timings:   sample time =     0.00 ms /     1 runs (    0.00 ms per run)
+whisper_print_timings:   encode time =     0.00 ms /     1 runs (    0.00 ms per run)
+whisper_print_timings:   decode time =     0.00 ms /     1 runs (    0.00 ms per run)
+whisper_print_timings:   batchd time =     0.00 ms /     1 runs (    0.00 ms per run)
+whisper_print_timings:   prompt time =     0.00 ms /     1 runs (    0.00 ms per run)
+whisper_print_timings:    total time =  3262.16 ms
+
+[RAW WHISPER] What to you is the most beautiful
+
+[temp S0] what to you is the most beautiful............[Frame] t=1250 ms, emb_dim=512
+[Frame] t=750 ms, emb_dim=512
+............[Frame] t=1500 ms, emb_dim=512
+[Frame] t=1000 ms, emb_dim=512
+.............[Frame] t=1750 ms, emb_dim=512
+[Frame] t=1250 ms, emb_dim=512
+............[Frame] t=2000 ms, emb_dim=512
+[Frame] t=1500 ms, emb_dim=512
+.[whisper] running on samples=24000, threads=20
+[whisper] pcm_f32[0:5]=0.311096,0.374329,0.422302,0.471954,0.498627
+[whisper] progress: 0%
+[00:00:00.000 --> 00:00:01.440]  [_BEG_] most beautiful year in physics.[_TT_72]
+[whisper] progress: 100%
+[whisper] segments=1
+
+whisper_print_timings:     load time =   229.43 ms
+whisper_print_timings:     fallbacks =   0 p /   0 h
+whisper_print_timings:      mel time =     0.00 ms
+whisper_print_timings:   sample time =     0.00 ms /     1 runs (    0.00 ms per run)
+whisper_print_timings:   encode time =     0.00 ms /     1 runs (    0.00 ms per run)
+whisper_print_timings:   decode time =     0.00 ms /     1 runs (    0.00 ms per run)
+whisper_print_timings:   batchd time =     0.00 ms /     1 runs (    0.00 ms per run)
+whisper_print_timings:   prompt time =     0.00 ms /     1 runs (    0.00 ms per run)
+whisper_print_timings:    total time =  4550.54 ms
+
+[RAW WHISPER] most beautiful year in physics.
+
+[temp S0] year in physics............[Frame] t=2250 ms, emb_dim=512
+[Frame] t=1750 ms, emb_dim=512
+............[Frame] t=2500 ms, emb_dim=512
+[Frame] t=2000 ms, emb_dim=512
+.............[Frame] t=2750 ms, emb_dim=512
+[Frame] t=2250 ms, emb_dim=512
+............[Frame] t=3000 ms, emb_dim=512
+[Frame] t=2500 ms, emb_dim=512
+.[whisper] running on samples=24000, threads=20
+[whisper] pcm_f32[0:5]=0.115356,0.128082,0.132355,0.140686,0.153046
+[whisper] progress: 0%
+[00:00:00.000 --> 00:00:01.480]  [_BEG_] physics.[_TT_74]
+[whisper] progress: 100%
+[whisper] segments=1
+
+whisper_print_timings:     load time =   229.43 ms
+whisper_print_timings:     fallbacks =   0 p /   0 h
+whisper_print_timings:      mel time =     0.00 ms
+whisper_print_timings:   sample time =     0.00 ms /     1 runs (    0.00 ms per run)
+whisper_print_timings:   encode time =     0.00 ms /     1 runs (    0.00 ms per run)
+whisper_print_timings:   decode time =     0.00 ms /     1 runs (    0.00 ms per run)
+whisper_print_timings:   batchd time =     0.00 ms /     1 runs (    0.00 ms per run)
+whisper_print_timings:   prompt time =     0.00 ms /     1 runs (    0.00 ms per run)
+whisper_print_timings:    total time =  5909.67 ms
+
+[RAW WHISPER] physics.
+............[Frame] t=3250 ms, emb_dim=512
+[Frame] t=2750 ms, emb_dim=512
+............[Frame] t=3500 ms, emb_dim=512
+[Frame] t=3000 ms, emb_dim=512
+.............[Frame] t=3750 ms, emb_dim=512
+[Frame] t=3250 ms, emb_dim=512
+............[Frame] t=4000 ms, emb_dim=512
+[Frame] t=3500 ms, emb_dim=512
+.[whisper] running on samples=24000, threads=20
+[whisper] pcm_f32[0:5]=0.0781555,0.0789795,0.0800476,0.0806885,0.0810547
+[whisper] progress: 0%
+[00:00:00.000 --> 00:00:02.000]  [_BEG_] Consulul momentum.[_TT_100]
+[whisper] progress: 100%
+[whisper] segments=1
+
+whisper_print_timings:     load time =   229.43 ms
+whisper_print_timings:     fallbacks =   0 p /   0 h
+whisper_print_timings:      mel time =     0.00 ms
+whisper_print_timings:   sample time =     0.00 ms /     1 runs (    0.00 ms per run)
+whisper_print_timings:   encode time =     0.00 ms /     1 runs (    0.00 ms per run)
+whisper_print_timings:   decode time =     0.00 ms /     1 runs (    0.00 ms per run)
+whisper_print_timings:   batchd time =     0.00 ms /     1 runs (    0.00 ms per run)
+whisper_print_timings:   prompt time =     0.00 ms /     1 runs (    0.00 ms per run)
+whisper_print_timings:    total time =  7367.31 ms
+
+[RAW WHISPER] Consulul momentum.
+
+[temp S0] consulul momentum............[Frame] t=4250 ms, emb_dim=512
+[Frame] t=3750 ms, emb_dim=512
+............[Frame] t=4500 ms, emb_dim=512
+[Frame] t=4000 ms, emb_dim=512
+.............[Frame] t=4750 ms, emb_dim=512
+[Frame] t=4250 ms, emb_dim=512
+............[Frame] t=5000 ms, emb_dim=512
+[Frame] t=4500 ms, emb_dim=512
+.[whisper] running on samples=24000, threads=20
+[whisper] pcm_f32[0:5]=0.13266,0.129425,0.125977,0.12262,0.118866
+[whisper] progress: 0%
+[00:00:00.000 --> 00:00:02.000]  [_BEG_] You'll have great, yeah.[_TT_100]
+[whisper] progress: 100%
+[whisper] segments=1
+
+whisper_print_timings:     load time =   229.43 ms
+whisper_print_timings:     fallbacks =   0 p /   0 h
+whisper_print_timings:      mel time =     0.00 ms
+whisper_print_timings:   sample time =     0.00 ms /     1 runs (    0.00 ms per run)
+whisper_print_timings:   encode time =     0.00 ms /     1 runs (    0.00 ms per run)
+whisper_print_timings:   decode time =     0.00 ms /     1 runs (    0.00 ms per run)
+whisper_print_timings:   batchd time =     0.00 ms /     1 runs (    0.00 ms per run)
+whisper_print_timings:   prompt time =     0.00 ms /     1 runs (    0.00 ms per run)
+whisper_print_timings:    total time =  8857.31 ms
+
+[RAW WHISPER] You'll have great, yeah.
+
+[temp S0] you ll have great yeah............[Frame] t=5250 ms, emb_dim=512
+[Frame] t=4750 ms, emb_dim=512
+............[Frame] t=5500 ms, emb_dim=512
+[Frame] t=5000 ms, emb_dim=512
+.............[Frame] t=5750 ms, emb_dim=512
+[Frame] t=5250 ms, emb_dim=512
+............[Frame] t=6000 ms, emb_dim=512
+[Frame] t=5500 ms, emb_dim=512
+.[whisper] running on samples=24000, threads=20
+[whisper] pcm_f32[0:5]=-0.00561523,-0.0111084,-0.00247192,0.0397949,0.0774841
+[whisper] progress: 0%
+[00:00:00.000 --> 00:00:02.000]  [_BEG_] Yeah, if you were ever[_TT_100]
+[whisper] progress: 100%
+[whisper] segments=1
+
+whisper_print_timings:     load time =   229.43 ms
+whisper_print_timings:     fallbacks =   0 p /   0 h
+whisper_print_timings:      mel time =     0.00 ms
+whisper_print_timings:   sample time =     0.00 ms /     1 runs (    0.00 ms per run)
+whisper_print_timings:   encode time =     0.00 ms /     1 runs (    0.00 ms per run)
+whisper_print_timings:   decode time =     0.00 ms /     1 runs (    0.00 ms per run)
+whisper_print_timings:   batchd time =     0.00 ms /     1 runs (    0.00 ms per run)
+whisper_print_timings:   prompt time =     0.00 ms /     1 runs (    0.00 ms per run)
+whisper_print_timings:    total time = 10197.54 ms
+
+[RAW WHISPER] Yeah, if you were ever
+
+[temp S0] if you were ever............[Frame] t=6250 ms, emb_dim=512
+[Frame] t=5750 ms, emb_dim=512
+............[Frame] t=6500 ms, emb_dim=512
+[Frame] t=6000 ms, emb_dim=512
+..........
+
+[Phase2] Clustering 25 frames...
+[cluster_frames] Clustering 25 frames with max_speakers=2, threshold=0.35
+[cluster_frames] Initial centroid S0: frame 0
+[cluster_frames] Added centroid S1: frame 8 (max_sim=0.166 < threshold=0.350)
+[cluster_frames] Initialized 2 centroids
+[cluster_frames] Clustering complete: 2 speakers
+  Speaker 0: 13 frames
+  Speaker 1: 12 frames
+[Phase2] Reassigning speakers to 5 segments...
+[seg 0] t=[0, 1500]ms, found 6 frames
+  runs: S0[0-4:5] S1[5-5:1] 
+  ΓåÆ dominant S0 (coverage=83.3%)
+[seg 1] t=[1500, 3000]ms, found 9 frames
+  runs: S0[0-1:2] S1[2-8:7] 
+  ΓåÆ dominant S1 (coverage=77.8%)
+[seg 2] t=[4500, 6000]ms, found 9 frames
+  runs: S1[0-0:1] S0[1-4:4] S1[5-5:1] S0[6-8:3] 
+  ΓåÆ transition S1ΓåÆS0, assigned to S0 (last)
+
+=== Transcription with Speaker Diarization ===
+
+[S0] what to you is the most beautiful
+[S1] year in physics
+[S0] consulul momentum
+[S0] you ll have great yeah
+[S0] if you were ever
+
+
+[Phase2] Frame statistics:
+  - Total frames extracted: 25
+  - Coverage duration: 7.0s
+  - Frames per second: 3.6
+
+[ContinuousFrameAnalyzer] Cleanup: extracted 25 frames over 7.0s
+[save] resampled audio saved to: output/whisper_input_16k.wav
+
+
+[perf] audio_sec=9.000, wall_sec=9.881, xRealtime=0.911, t_resample=0.007, t_diar=0.623, t_whisper=6.883
+[warn] 91 chunks dropped (processing too slow)
+[done] exit=0

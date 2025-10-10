@@ -3,6 +3,7 @@
 
 There's a ready script to activate dev variables for currently installed VS Build Tools: `${workspace}\Enter-VSDev.ps1`. Just run it once in the new PowerShell session, if needed. Just once!
 
+
 ## Git Commands
 
 Never commit or push without User approval! Always test the solution before committing a new version. 
@@ -20,6 +21,13 @@ Document all important architectural decisions, design artifacts, and tasks in t
 This file should be updated as the project evolves.
 
 Document there all important findings and changes to the architecture, tech stack, libraries, and project structure.
+
+## Documenting
+
+Internal documentation, architecture, prograss tracking, etc: /spec
+User docuementation: /docs
+
+Project overview, advertisement, key information and annoucements: /README.md
 
 
 ## Browsing for functionality

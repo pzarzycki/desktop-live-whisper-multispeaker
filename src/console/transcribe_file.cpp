@@ -17,6 +17,7 @@
 #include <atomic>
 #include <mutex>
 #include <map>
+#include <set>
 #include "asr/whisper_backend.hpp"
 #include "audio/windows_wasapi.hpp"
 #include "audio/file_capture.hpp"
@@ -184,13 +185,50 @@ int main(int argc, char** argv) {
     audio::WindowsWasapiOut speaker;
     bool useFile = !path.empty();
     int in_sr = 0;
+    std::string actualPath = path;
+    
     if (useFile) {
         if (!fileCap.start_from_wav(path)) {
             std::cerr << "[input] failed to open WAV: " << path << "\n";
             return 1;
         }
         in_sr = fileCap.sample_rate();
-        std::cerr << "[input] file: " << path
+        
+        // CRITICAL FIX: Linear interpolation resampler is BROKEN (verified with whisper-cli)
+        // Use ffmpeg for professional-grade resampling
+        if (in_sr != 16000) {
+            std::cerr << "[input] Converting " << in_sr << "Hz to 16kHz using ffmpeg (linear interpolation produces garbage)...\n";
+            actualPath = "output/temp_16k.wav";
+            
+            // Ensure output directory exists
+            namespace fs = std::filesystem;
+            try {
+                fs::path outPath = fs::u8path(actualPath);
+                if (outPath.has_parent_path()) {
+                    fs::create_directories(outPath.parent_path());
+                }
+            } catch (...) {}
+            
+            std::string cmd = "ffmpeg -i \"" + path + "\" -ar 16000 -ac 1 -c:a pcm_s16le \"" + actualPath + "\" -y -loglevel error";
+            int ret = std::system(cmd.c_str());
+            if (ret != 0) {
+                std::cerr << "[ERROR] ffmpeg conversion failed. Please install ffmpeg:\n";
+                std::cerr << "        Windows: winget install ffmpeg  OR  choco install ffmpeg\n";
+                std::cerr << "        Or provide 16kHz input directly.\n";
+                return 1;
+            }
+            
+            // Re-open the converted file
+            fileCap.stop();
+            if (!fileCap.start_from_wav(actualPath)) {
+                std::cerr << "[input] failed to open converted WAV: " << actualPath << "\n";
+                return 1;
+            }
+            in_sr = fileCap.sample_rate();
+            std::cerr << "[input] Conversion successful, using: " << actualPath << "\n";
+        }
+        
+        std::cerr << "[input] file: " << actualPath
                   << ", sr=" << in_sr
                   << ", ch=" << fileCap.channels()
                   << ", bps=" << fileCap.bits_per_sample()
@@ -327,51 +365,56 @@ int main(int argc, char** argv) {
     std::thread processing_thread;
     if (enable_asr) {
         processing_thread = std::thread([&]() {
-            // ORIGINAL PROVEN SEGMENTATION STRATEGY
-            // - Accumulate audio in acc16k buffer
-            // - Transcribe when window is full (1.5s)
-            // - Keep 0.5s overlap for context
-            // DO NOT MODIFY - see specs/architecture.md for why this works
+            // NEW STREAMING ARCHITECTURE
+            // - Accumulate audio in sliding window (5-10s)
+            // - Let Whisper find natural boundaries (VAD)
+            // - Only emit "stable" segments (not in overlap zone)
+            // - Keep feeding infinite stream from microphone
+            
+            diar::SpeakerClusterer spk(2, 0.45f);
+            const int target_hz = 16000;
+            
+            // REAL STREAMING: Fixed buffers, must handle infinite audio
+            const size_t buffer_duration_s = 10;  // 10s window (reasonable latency)
+            const size_t overlap_duration_s = 5;  // 5s overlap for MORE backward context (no latency impact!)
+            const size_t emit_boundary_s = buffer_duration_s - overlap_duration_s;  // Emit first 5s
+            const int64_t emit_boundary_ms = emit_boundary_s * 1000;
+            const size_t max_buffer_samples = target_hz * buffer_duration_s;
             
             std::vector<int16_t> acc16k;
-            diar::SpeakerClusterer spk(2, 0.45f);  // Lowered from 0.60 to make 2nd speaker easier to create
-            Deduper dedup;
-            const int target_hz = 16000;
-            const size_t window_samples = static_cast<size_t>(target_hz * 1.5);
-            const size_t overlap_samples = static_cast<size_t>(target_hz * 0.5);
+            acc16k.reserve(max_buffer_samples);
+            int64_t buffer_start_time_ms = 0;
             
-            // Track segments for frame-based speaker assignment
-            struct SegmentInfo {
+            struct EmittedSegment {
                 std::string text;
                 int64_t t_start_ms;
                 int64_t t_end_ms;
-                int speaker_id;  // Will be assigned from frames
+                int speaker_id;
             };
-            std::vector<SegmentInfo> segments;
-            int64_t audio_time_ms = 0;  // Track position in audio stream
+            std::vector<EmittedSegment> all_segments;
+            std::vector<EmittedSegment> held_segments;  // Segments in overlap zone (5-10s)
+            int64_t last_emitted_end_ms = 0;  // Track last emitted timestamp to prevent duplicates
             
-            // Phase 2: Continuous frame analyzer (PARALLEL - does not affect Whisper)
+            // Phase 2: Continuous frame analyzer (PARALLEL)
             diar::ContinuousFrameAnalyzer::Config frame_config;
-            frame_config.hop_ms = 250;      // 4 frames per second
-            frame_config.window_ms = 1000;  // 1s window for each embedding
-            frame_config.history_sec = 60;  // Keep last 60s
+            frame_config.hop_ms = 250;
+            frame_config.window_ms = 1000;
+            frame_config.history_sec = 60;
             frame_config.verbose = verbose;
-            // Using neural embeddings by default (WeSpeaker ResNet34)
             frame_config.embedding_mode = diar::EmbeddingMode::NeuralONNX;
             diar::ContinuousFrameAnalyzer frame_analyzer(target_hz, frame_config);
             
             if (verbose) {
-                fprintf(stderr, "[Phase2] Frame analyzer: hop=%dms, window=%dms\n",
-                        frame_config.hop_ms, frame_config.window_ms);
+                fprintf(stderr, "[Stream] 10s buffer, emit first 5s only, 5s overlap for MAXIMUM backward context\n");
             }
             
             while (true) {
                 audio::AudioQueue::Chunk chunk;
                 if (!audioQueue.pop(chunk)) {
-                    break; // Queue stopped
+                    break;
                 }
                 
-                // Resample to 16kHz
+                // Resample to 16kHz (should be no-op if already 16kHz)
                 auto t_res0 = std::chrono::steady_clock::now();
                 auto ds = resample_to_16k(chunk.samples, chunk.sample_rate);
                 auto t_res1 = std::chrono::steady_clock::now();
@@ -382,234 +425,262 @@ int main(int argc, char** argv) {
                     wavResampledOut.write(ds.data(), ds.size());
                 }
                 
-                // Original: Accumulate in acc16k
+                // Accumulate audio
                 acc16k.insert(acc16k.end(), ds.begin(), ds.end());
                 
-                // Phase 2 (PARALLEL): Feed to frame analyzer (read-only, doesn't affect Whisper)
-                int new_frames = frame_analyzer.add_audio(ds.data(), ds.size());
+                // Feed to frame analyzer (parallel)
+                frame_analyzer.add_audio(ds.data(), ds.size());
                 
                 if (verbose) { std::cerr << "." << std::flush; }
                 
-                // Process window if ready (ORIGINAL LOGIC - DO NOT MODIFY)
-                if (acc16k.size() >= window_samples) {
-                    // Gate mostly-silent windows
+                // Process when buffer is full
+                if (acc16k.size() >= max_buffer_samples) {
+                    // Gate mostly-silent buffers
                     double sum2 = 0.0;
                     for (auto s : acc16k) { double v = s / 32768.0; sum2 += v*v; }
                     double rms = std::sqrt(sum2 / std::max<size_t>(1, acc16k.size()));
                     double dbfs = (rms > 0) ? 20.0 * std::log10(rms) : -120.0;
                     
-                    std::string txt;
                     if (dbfs > -55.0) {
-                        int sid = -1;
-                        if (enable_diar) {
-                            auto t_d0 = std::chrono::steady_clock::now();
-                            // Use 40 mel bands for better speaker discrimination
-                            auto emb = diar::compute_speaker_embedding(acc16k.data(), acc16k.size(), target_hz);
-                            sid = spk.assign(emb);
-                            auto t_d1 = std::chrono::steady_clock::now();
-                            perf.add_diar(std::chrono::duration<double>(t_d1 - t_d0).count());
-                        }
-                        
-                        // Whisper
+                        // Transcribe the full buffer - let Whisper segment naturally
                         auto t_w0 = std::chrono::steady_clock::now();
-                        std::string segTxt = whisper.transcribe_chunk(acc16k.data(), acc16k.size());
+                        auto whisper_segments = whisper.transcribe_chunk_segments(acc16k.data(), acc16k.size());
                         auto t_w1 = std::chrono::steady_clock::now();
                         perf.add_whisper(std::chrono::duration<double>(t_w1 - t_w0).count());
                         
-                        // Remove overlap-duplicated prefix words
-                        std::string merged = dedup.merge(segTxt);
+                        if (verbose) {
+                            fprintf(stderr, "\n[Whisper] Buffer %lldms-%lldms: %zu segments\n",
+                                    buffer_start_time_ms, buffer_start_time_ms + (acc16k.size() * 1000) / target_hz,
+                                    whisper_segments.size());
+                        }
                         
-                        // Store segment with timing for frame-based speaker assignment
-                        if (!merged.empty()) {
-                            SegmentInfo seg;
-                            seg.text = merged;
-                            seg.t_start_ms = audio_time_ms;
-                            seg.t_end_ms = audio_time_ms + (acc16k.size() * 1000) / target_hz;
-                            seg.speaker_id = sid;  // Temporary, will be reassigned from frames
-                            segments.push_back(seg);
+                        // Only emit segments that END before the emit boundary (5s mark)
+                        // This ensures we never re-transcribe the same audio in next window
+                        // The 5-10s segments are HELD and will be emitted when next window starts
+                        for (const auto& wseg : whisper_segments) {
+                            if (wseg.text.empty()) continue;
+                            
+                            // Calculate segment timestamps FIRST (needed for both emit and hold)
+                            int64_t seg_start_ms = buffer_start_time_ms + wseg.t0_ms;
+                            int64_t seg_end_ms = buffer_start_time_ms + wseg.t1_ms;
+                            
+                            // Compute speaker for this segment FIRST (needed for both emit and hold)
+                            int sid = -1;
+                            if (enable_diar) {
+                                int start_sample = (wseg.t0_ms * target_hz) / 1000;
+                                int end_sample = (wseg.t1_ms * target_hz) / 1000;
+                                start_sample = std::max(0, std::min(start_sample, (int)acc16k.size()));
+                                end_sample = std::max(start_sample, std::min(end_sample, (int)acc16k.size()));
+                                
+                                if (end_sample - start_sample > target_hz / 2) {
+                                    auto t_d0 = std::chrono::steady_clock::now();
+                                    auto emb = diar::compute_speaker_embedding(
+                                        acc16k.data() + start_sample,
+                                        end_sample - start_sample,
+                                        target_hz
+                                    );
+                                    sid = spk.assign(emb);
+                                    auto t_d1 = std::chrono::steady_clock::now();
+                                    perf.add_diar(std::chrono::duration<double>(t_d1 - t_d0).count());
+                                }
+                            }
+                            
+                            // CRITICAL: Skip segments that were already emitted in previous window
+                            // This handles Whisper's re-segmentation across window boundaries
+                            if (seg_end_ms <= last_emitted_end_ms) {
+                                // Segment entirely before what we've already emitted - skip
+                                if (verbose) {
+                                    fprintf(stderr, "[SKIP %.2f-%.2f] %s (already emitted in previous window)\n",
+                                            seg_start_ms/1000.0, seg_end_ms/1000.0, wseg.text.c_str());
+                                }
+                                continue;
+                            }
+                            
+                            // Only emit if segment ends BEFORE the emit boundary (5s mark)
+                            if (wseg.t1_ms >= emit_boundary_ms) {
+                                // HOLD this segment - it's in overlap zone (5-10s)
+                                // We'll emit it when window slides (it won't be re-transcribed)
+                                EmittedSegment held;
+                                held.text = wseg.text;
+                                held.t_start_ms = seg_start_ms;
+                                held.t_end_ms = seg_end_ms;
+                                held.speaker_id = sid;
+                                held_segments.push_back(held);
+                                
+                                if (verbose) {
+                                    fprintf(stderr, "[HOLD %.2f-%.2f] %s (in overlap, will emit on slide)\n",
+                                            wseg.t0_ms/1000.0, wseg.t1_ms/1000.0, wseg.text.c_str());
+                                }
+                                continue;
+                            }
+                            
+                            // Emit this segment immediately
+                            EmittedSegment seg;
+                            seg.text = wseg.text;
+                            seg.t_start_ms = seg_start_ms;
+                            seg.t_end_ms = seg_end_ms;
+                            seg.speaker_id = sid;
+                            all_segments.push_back(seg);
+                            last_emitted_end_ms = std::max(last_emitted_end_ms, seg_end_ms);  // Track for duplicate prevention
                             
                             if (verbose) {
                                 std::lock_guard<std::mutex> lock(print_mtx);
-                                fprintf(stderr, "\n[temp S%d] %s", sid, merged.c_str());
-                                fflush(stderr);
+                                fprintf(stderr, "[EMIT S%d %.2f-%.2f] %s\n",
+                                        sid, seg_start_ms/1000.0, seg_end_ms/1000.0, seg.text.c_str());
                             }
                         }
                     }
                     
-                    // Update audio time position
-                    audio_time_ms += (acc16k.size() * 1000) / target_hz;
+                    // BEFORE sliding: Emit held segments from previous window
+                    // (They're now confirmed and won't be re-transcribed)
+                    for (const auto& held : held_segments) {
+                        all_segments.push_back(held);
+                        last_emitted_end_ms = std::max(last_emitted_end_ms, held.t_end_ms);  // Track for duplicate prevention
+                        if (verbose) {
+                            fprintf(stderr, "[EMIT-HELD S%d %.2f-%.2f] %s\n",
+                                    held.speaker_id, held.t_start_ms/1000.0, held.t_end_ms/1000.0, held.text.c_str());
+                        }
+                    }
+                    held_segments.clear();  // Clear for next window
                     
-                    // Keep overlap (don't update audio_time_ms for overlap portion)
+                    // Slide the window: keep last 5s as context for next iteration
+                    // This gives MAXIMUM backward context without adding latency
+                    const size_t overlap_samples = target_hz * overlap_duration_s;
                     if (acc16k.size() > overlap_samples) {
+                        size_t discard = acc16k.size() - overlap_samples;
+                        buffer_start_time_ms += (discard * 1000) / target_hz;
                         std::vector<int16_t> tail(acc16k.end() - overlap_samples, acc16k.end());
                         acc16k.swap(tail);
                     } else {
+                        buffer_start_time_ms += (acc16k.size() * 1000) / target_hz;
                         acc16k.clear();
                     }
                 }
             }
             
-            // Final flush if we have a full window (ORIGINAL LOGIC)
-            if (acc16k.size() >= window_samples) {
-                int sid = -1;
-                if (enable_diar) {
-                    // Use 40 mel bands for better speaker discrimination
-                    auto emb = diar::compute_speaker_embedding(acc16k.data(), acc16k.size(), target_hz);
-                    sid = spk.assign(emb);
+            // Final flush: FIRST emit any held segments from last window
+            if (!held_segments.empty()) {
+                fprintf(stderr, "\n[Final Flush] Emitting %zu held segments\n", held_segments.size());
+                for (const auto& held : held_segments) {
+                    all_segments.push_back(held);
+                    if (verbose) {
+                        fprintf(stderr, "[EMIT-HELD S%d %.2f-%.2f] %s\n",
+                                held.speaker_id, held.t_start_ms/1000.0, held.t_end_ms/1000.0, held.text.c_str());
+                    }
                 }
-                auto segTxt = whisper.transcribe_chunk(acc16k.data(), acc16k.size());
-                auto merged = dedup.merge(segTxt);
-                
-                if (!merged.empty()) {
-                    SegmentInfo seg;
-                    seg.text = merged;
-                    seg.t_start_ms = audio_time_ms;
-                    seg.t_end_ms = audio_time_ms + (acc16k.size() * 1000) / target_hz;
-                    seg.speaker_id = sid;
-                    segments.push_back(seg);
-                }
+                held_segments.clear();
             }
             
-            // Phase 2b: Cluster frames and reassign speakers
-            fprintf(stderr, "\n\n[Phase2] Clustering %zu frames...\n", frame_analyzer.frame_count());
+            // Final flush: process any remaining audio in buffer
+            // IMPORTANT: Skip overlap samples - they were already transcribed in last window!
+            const size_t overlap_samples = target_hz * overlap_duration_s;
+            size_t flush_start_sample = std::min(overlap_samples, acc16k.size());
+            size_t flush_sample_count = (acc16k.size() > flush_start_sample) ? (acc16k.size() - flush_start_sample) : 0;
             
-            // Phase 2b-2: Speaker run detection for improved voting
-            struct SpeakerRun {
-                int speaker_id;
-                int start_idx;
-                int end_idx;
-                int length() const { return end_idx - start_idx + 1; }
-            };
-            
-            auto detect_speaker_runs = [](const std::vector<diar::ContinuousFrameAnalyzer::Frame>& frames) 
-                -> std::vector<SpeakerRun> {
-                std::vector<SpeakerRun> runs;
-                if (frames.empty()) return runs;
+            if (flush_sample_count >= target_hz / 2) {  // At least 0.5 second of NEW audio
+                fprintf(stderr, "\n[Final Flush] Processing remaining %.2fs in buffer (skipping %.2fs overlap)\n",
+                        flush_sample_count / (float)target_hz, flush_start_sample / (float)target_hz);
                 
-                int current_speaker = frames[0].speaker_id;
-                int run_start = 0;
+                // Calculate where the NEW audio starts in time
+                int64_t flush_start_time_ms = buffer_start_time_ms + (flush_start_sample * 1000) / target_hz;
                 
-                for (size_t i = 1; i <= frames.size(); ++i) {
-                    if (i == frames.size() || frames[i].speaker_id != current_speaker) {
-                        runs.push_back({current_speaker, run_start, static_cast<int>(i - 1)});
-                        if (i < frames.size()) {
-                            current_speaker = frames[i].speaker_id;
-                            run_start = static_cast<int>(i);
+                const int16_t* flush_data = acc16k.data() + flush_start_sample;
+                
+                double sum2 = 0.0;
+                for (size_t i = 0; i < flush_sample_count; i++) {
+                    double v = flush_data[i] / 32768.0;
+                    sum2 += v*v;
+                }
+                double rms = std::sqrt(sum2 / std::max<size_t>(1, flush_sample_count));
+                double dbfs = (rms > 0) ? 20.0 * std::log10(rms) : -120.0;
+                
+                if (dbfs > -55.0) {  // Not silence
+                    auto whisper_segments = whisper.transcribe_chunk_segments(flush_data, flush_sample_count);
+                    
+                    for (const auto& wseg : whisper_segments) {
+                        if (wseg.text.empty()) continue;
+                        
+                        int64_t seg_start_ms = flush_start_time_ms + wseg.t0_ms;
+                        int64_t seg_end_ms = flush_start_time_ms + wseg.t1_ms;
+                        
+                        // Compute speaker (within the flushed NEW audio region)
+                        int sid = -1;
+                        if (enable_diar) {
+                            int start_sample = (wseg.t0_ms * target_hz) / 1000;
+                            int end_sample = (wseg.t1_ms * target_hz) / 1000;
+                            start_sample = std::max(0, std::min(start_sample, (int)flush_sample_count));
+                            end_sample = std::max(start_sample, std::min(end_sample, (int)flush_sample_count));
+                            
+                            if (end_sample - start_sample > target_hz / 2) {
+                                auto emb = diar::compute_speaker_embedding(
+                                    flush_data + start_sample,
+                                    end_sample - start_sample,
+                                    target_hz
+                                );
+                                sid = spk.assign(emb);
+                            }
+                        }
+                        
+                        EmittedSegment seg;
+                        seg.text = wseg.text;
+                        seg.t_start_ms = seg_start_ms;
+                        seg.t_end_ms = seg_end_ms;
+                        seg.speaker_id = sid;
+                        all_segments.push_back(seg);
+                        
+                        if (verbose) {
+                            fprintf(stderr, "[FLUSH S%d %.2f-%.2f] %s\n",
+                                    sid, seg_start_ms/1000.0, seg_end_ms/1000.0, seg.text.c_str());
                         }
                     }
                 }
-                return runs;
-            };
+            }
             
-            if (frame_analyzer.frame_count() > 0) {
-                frame_analyzer.cluster_frames(2, 0.35f);  // max_speakers=2, threshold=0.35 (CAMPlus optimal)
+            // Phase 2: Cluster frames for speaker assignment
+            fprintf(stderr, "\n[Phase2] Clustering %zu frames...\n", frame_analyzer.frame_count());
+            
+            if (frame_analyzer.frame_count() > 0 && enable_diar) {
+                frame_analyzer.cluster_frames(2, 0.35f);
+            }
+            
+            // Reassign speakers to ALL segments using frame clustering
+            if (enable_diar) {
+                fprintf(stderr, "[Phase2] Reassigning speakers to %zu segments...\n", all_segments.size());
                 
-                fprintf(stderr, "[Phase2] Reassigning speakers to %zu segments...\n", segments.size());
-                
-                // Reassign speaker IDs to segments based on frames with run-based voting
-                int seg_num = 0;
-                for (auto& seg : segments) {
+                // Map frame-level speakers to emitted segments
+                for (auto& seg : all_segments) {
                     auto frames = frame_analyzer.get_frames_in_range(seg.t_start_ms, seg.t_end_ms);
                     
-                    if (seg_num < 3) {
-                        fprintf(stderr, "[seg %d] t=[%lld, %lld]ms, found %zu frames\n", 
-                                seg_num, seg.t_start_ms, seg.t_end_ms, frames.size());
-                    }
-                    
                     if (!frames.empty()) {
-                        // Phase 2b-2: Run-based voting with transition detection
-                        auto runs = detect_speaker_runs(frames);
-                        
-                        if (seg_num < 3 && verbose) {
-                            fprintf(stderr, "  runs: ");
-                            for (const auto& run : runs) {
-                                fprintf(stderr, "S%d[%d-%d:%d] ", 
-                                        run.speaker_id, run.start_idx, run.end_idx, run.length());
-                            }
-                            fprintf(stderr, "\n");
+                        // Simple majority vote
+                        std::map<int, int> votes;
+                        for (const auto& frame : frames) {
+                            votes[frame.speaker_id]++;
                         }
                         
-                        int assigned_speaker = -1;
-                        bool has_transition = false;
-                        int secondary_speaker = -1;
-                        
-                        if (!runs.empty()) {
-                            // Find longest run
-                            SpeakerRun longest_run = runs[0];
-                            int longest_length = runs[0].length();
-                            
-                            for (const auto& run : runs) {
-                                int length = run.length();
-                                if (length > longest_length) {
-                                    longest_length = length;
-                                    longest_run = run;
-                                }
-                            }
-                            
-                            // Check if dominant (>70% coverage)
-                            float coverage = static_cast<float>(longest_length) / frames.size();
-                            
-                            if (coverage > 0.70f) {
-                                // Clear dominant speaker
-                                assigned_speaker = longest_run.speaker_id;
-                                
-                                if (seg_num < 3 && verbose) {
-                                    fprintf(stderr, "  → dominant S%d (coverage=%.1f%%)\n", 
-                                            assigned_speaker, coverage * 100.0f);
-                                }
-                            } else {
-                                // Mixed segment: detect transition
-                                has_transition = (runs.size() > 1 && 
-                                                runs[0].speaker_id != runs.back().speaker_id);
-                                
-                                if (has_transition) {
-                                    // Assign to last speaker (person speaking at segment end)
-                                    assigned_speaker = frames.back().speaker_id;
-                                    secondary_speaker = runs[0].speaker_id;
-                                    
-                                    if (seg_num < 3 && verbose) {
-                                        fprintf(stderr, "  → transition S%d→S%d, assigned to S%d (last)\n",
-                                                secondary_speaker, assigned_speaker, assigned_speaker);
-                                    }
-                                } else {
-                                    // Same speaker at boundaries or single run
-                                    assigned_speaker = longest_run.speaker_id;
-                                    
-                                    if (seg_num < 3 && verbose) {
-                                        fprintf(stderr, "  → mixed but consistent S%d\n", assigned_speaker);
-                                    }
-                                }
+                        int best_speaker = -1;
+                        int best_count = 0;
+                        for (const auto& [spk, count] : votes) {
+                            if (count > best_count) {
+                                best_count = count;
+                                best_speaker = spk;
                             }
                         }
-                        
-                        if (assigned_speaker >= 0) {
-                            seg.speaker_id = assigned_speaker;
-                        }
+                        seg.speaker_id = best_speaker;
                     }
-                    seg_num++;
                 }
             }
             
-            // Output all segments with final speaker assignments
-            fprintf(stderr, "\n=== Transcription with Speaker Diarization ===\n");
-            for (const auto& seg : segments) {
-                if (seg.speaker_id >= 0) {
-                    fprintf(stderr, "\n[S%d] %s", seg.speaker_id, seg.text.c_str());
-                } else {
-                    fprintf(stderr, "\n%s", seg.text.c_str());
-                }
+            // Output final segments
+            fprintf(stderr, "\n\n=== Transcription with Speaker Diarization ===\n\n");
+            for (const auto& seg : all_segments) {
+                std::lock_guard<std::mutex> lock(print_mtx);
+                fprintf(stderr, "[S%d] %s\n", seg.speaker_id, seg.text.c_str());
             }
-            fprintf(stderr, "\n");
             
-            // Phase 2: Frame statistics
             fprintf(stderr, "\n\n[Phase2] Frame statistics:\n");
             fprintf(stderr, "  - Total frames extracted: %zu\n", frame_analyzer.frame_count());
-            fprintf(stderr, "  - Coverage duration: %.1fs\n", frame_analyzer.duration_ms() / 1000.0);
-            fprintf(stderr, "  - Frames per second: %.1f\n", 
-                    frame_analyzer.duration_ms() > 0 
-                        ? (frame_analyzer.frame_count() * 1000.0) / frame_analyzer.duration_ms()
-                        : 0.0);
-            fprintf(stderr, "\n");
+            fprintf(stderr, "  - Segments emitted: %zu\n", all_segments.size());
             
             processing_done = true;
         });

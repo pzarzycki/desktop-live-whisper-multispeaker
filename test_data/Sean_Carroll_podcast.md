@@ -1,0 +1,12 @@
+## Ground Truth ##
+
+WORD-LEVEL SPEAKER ASSIGNMENT
+```
+[S0] What to you is the most beautiful idea in physics?
+[S1] Conservation of momentum.
+[S0] Can you elaborate?
+[S1] Yeah. If you were Aristotle, when Aristotle wrote his book on
+```
+
+
+

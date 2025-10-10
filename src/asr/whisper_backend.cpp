@@ -244,8 +244,9 @@ std::vector<WhisperSegment> WhisperBackend::transcribe_chunk_segments(const int1
 	std::vector<WhisperSegment> segments;
 	if (!g_ws.ctx || !data || samples == 0) return segments;
 	
-	// Use EXACT same parameters as transcribe_chunk for consistency
-	whisper_full_params wparams = whisper_full_default_params(WHISPER_SAMPLING_GREEDY);
+	// Use BEAM SEARCH with same parameters as whisper-cli for quality
+	// whisper-cli uses: "5 beams + best of 5" for high-quality transcription
+	whisper_full_params wparams = whisper_full_default_params(WHISPER_SAMPLING_BEAM_SEARCH);
 	wparams.print_realtime   = false; // Don't print during transcription
 	wparams.print_progress   = false;
 	wparams.print_timestamps = false;
@@ -260,7 +261,8 @@ std::vector<WhisperSegment> WhisperBackend::transcribe_chunk_segments(const int1
 	wparams.max_len          = 0;
 	wparams.split_on_word    = false;
 	wparams.audio_ctx        = 0;
-	wparams.greedy.best_of   = 1;
+	wparams.beam_search.beam_size = 5;     // Match whisper-cli: 5 beams
+	wparams.beam_search.patience  = -1.0f; // Default patience
 	
 	std::vector<float> pcm_f32;
 	pcm_f32.reserve(samples);

@@ -81,11 +81,26 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         io.Fonts->AddFontDefault();
     }
 
-    // Setup Dear ImGui style (dark theme)
-    ImGui::StyleColorsDark();
+    // Setup Dear ImGui style (bright theme)
+    ImGui::StyleColorsLight();
+    
+    // Customize bright theme colors
+    ImGuiStyle& style = ImGui::GetStyle();
+    style.Colors[ImGuiCol_WindowBg] = ImVec4(0.96f, 0.96f, 0.96f, 1.0f);  // WhiteSmoke background
+    style.Colors[ImGuiCol_ChildBg] = ImVec4(1.0f, 1.0f, 1.0f, 1.0f);      // White for child windows
+    style.Colors[ImGuiCol_Text] = ImVec4(0.2f, 0.2f, 0.2f, 1.0f);         // Dark text
+    style.Colors[ImGuiCol_TextDisabled] = ImVec4(0.5f, 0.5f, 0.5f, 1.0f); // Gray disabled text
+    style.Colors[ImGuiCol_Border] = ImVec4(0.7f, 0.7f, 0.7f, 0.5f);       // Light gray borders
+    style.Colors[ImGuiCol_FrameBg] = ImVec4(0.9f, 0.9f, 0.9f, 1.0f);      // Light gray input backgrounds
+    style.Colors[ImGuiCol_FrameBgHovered] = ImVec4(0.85f, 0.85f, 0.85f, 1.0f);
+    style.Colors[ImGuiCol_FrameBgActive] = ImVec4(0.8f, 0.8f, 0.8f, 1.0f);
+    style.Colors[ImGuiCol_TitleBg] = ImVec4(0.88f, 0.88f, 0.88f, 1.0f);
+    style.Colors[ImGuiCol_TitleBgActive] = ImVec4(0.82f, 0.82f, 0.82f, 1.0f);
+    style.Colors[ImGuiCol_Button] = ImVec4(0.26f, 0.59f, 0.98f, 1.0f);    // Blue buttons
+    style.Colors[ImGuiCol_ButtonHovered] = ImVec4(0.36f, 0.69f, 1.0f, 1.0f);
+    style.Colors[ImGuiCol_ButtonActive] = ImVec4(0.16f, 0.49f, 0.88f, 1.0f);
     
     // Scale UI elements for DPI
-    ImGuiStyle& style = ImGui::GetStyle();
     style.ScaleAllSizes(dpi_scale);
 
     // Setup Platform/Renderer backends
@@ -132,7 +147,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
         // Rendering
         ImGui::Render();
-        const float clear_color[4] = { 0.12f, 0.12f, 0.12f, 1.00f }; // Dark background
+        const float clear_color[4] = { 0.96f, 0.96f, 0.96f, 1.00f }; // WhiteSmoke background
         g_pd3dDeviceContext->OMSetRenderTargets(1, &g_mainRenderTargetView, nullptr);
         g_pd3dDeviceContext->ClearRenderTargetView(g_mainRenderTargetView, clear_color);
         ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
