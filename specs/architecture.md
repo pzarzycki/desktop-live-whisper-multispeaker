@@ -1,5 +1,9 @@
 # Architecture Documentation
 
+**Central Hub:** This document describes the complete system architecture. See the [Documentation Index](#documentation-index) at the bottom for related documents.
+
+---
+
 ## 🚨 CRITICAL: WHISPER SEGMENTATION MUST NOT BE MODIFIED 🚨
 
 ### Empirical Finding (2025-10-07)
@@ -976,5 +980,42 @@ See comprehensive documentation:
 
 ---
 
+## Documentation Index
+
+### Core Architecture Documents (Start Here)
+- **[architecture.md](architecture.md)** (this file) - Complete system architecture overview
+- **[plan.md](plan.md)** - Project status, phases, and progress tracking
+- **[phase6_completion.md](phase6_completion.md)** - Phase 6 async architecture details
+
+### Component-Specific Documentation
+- **[transcription.md](transcription.md)** - Whisper ASR integration and best practices
+- **[diarization.md](diarization.md)** - Speaker identification system details
+- **[application_api_design.md](application_api_design.md)** - TranscriptionController API
+- **[continuous_architecture_findings.md](continuous_architecture_findings.md)** - Experimental findings
+
+### Phase Reports (Historical)
+- **[phase3_report.md](phase3_report.md)** - Phase 3: Frame voting speaker diarization
+- **[phase4_application_api_summary.md](phase4_application_api_summary.md)** - Phase 4: Controller API
+- **[phase5_gui_implementation_log.md](phase5_gui_implementation_log.md)** - Phase 5: GUI with ImGui
+
+### Streaming & Performance
+- **[STREAMING_STRATEGY.md](STREAMING_STRATEGY.md)** - Hold-and-emit streaming strategy
+- **[STREAMING_SUCCESS.md](STREAMING_SUCCESS.md)** - Streaming implementation validation
+- **[CIRCULAR_BUFFER_PROPOSAL.md](CIRCULAR_BUFFER_PROPOSAL.md)** - Buffer design exploration
+
+### Models & Configuration
+- **[MODELS.md](MODELS.md)** - Model files and download information
+- **[speaker_models_onnx.md](speaker_models_onnx.md)** - ONNX speaker embedding models
+- **[speaker_identification_analysis.md](speaker_identification_analysis.md)** - Speaker ID research
+
+### Platform & Organization
+- **[platform_separation.md](platform_separation.md)** - Multiplatform code organization (Windows/macOS)
+- **[README.md](README.md)** - Specs folder overview and navigation guide
+
+### For New Contributors
+Start with:
+1. **[NEXT_AGENT_START_HERE.md](NEXT_AGENT_START_HERE.md)** - Onboarding guide
+2. **[plan.md](plan.md)** - Current status and next steps
+3. **[architecture.md](architecture.md)** - This file (system overview)
 
 
