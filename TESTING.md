@@ -1,4 +1,14 @@
-# Quick Test - TranscriptionController
+# Testing Guide - TranscriptionController
+
+## Overview
+
+The primary test executable is **`test_transcription`**, which validates the complete system:
+- ✅ TranscriptionController API (`core/transcription_controller.cpp`)
+- ✅ Real-time audio processing with synthetic file playback
+- ✅ Whisper transcription engine
+- ✅ Speaker diarization (ONNX embeddings)
+- ✅ Audio playback (hear what's being transcribed)
+- ✅ Platform: Windows & macOS fully supported
 
 ## Prerequisites
 
@@ -7,6 +17,21 @@ Models must be in `models/` directory:
 - **Speaker embedding model**: `campplus_voxceleb.onnx` (default)
 
 ## Run Test
+
+### macOS
+
+```bash
+# Build
+cmake --preset macos-debug
+cmake --build build/macos-debug --target test_transcription -j 4
+
+# Run
+./build/macos-debug/test_transcription \
+  models/ggml-tiny.en.bin \
+  test_data/Sean_Carroll_podcast.wav
+```
+
+### Windows
 
 ```powershell
 # Build
@@ -26,23 +51,46 @@ cmake --build build --target test_transcription
 - Performance metrics at end:
   - Audio duration
   - Wall-clock time
-  - Realtime factor (should be < 1.5x)
+  - Realtime factor (should be < 1.5x for real-time capability)
   - Whisper processing time
   - Diarization time
   - Speaker statistics
 
-## Architecture
+## System Architecture
 
 ```
+test_transcription (apps/test_transcription_controller.cpp)
+    ↓
 TranscriptionController (core/transcription_controller.cpp)
-├── WhisperBackend (asr/whisper_backend.cpp)
-│   └── Uses: models/ggml-*.bin
-├── ContinuousFrameAnalyzer (diar/speaker_cluster.cpp)
-│   └── Uses: models/campplus_voxceleb.onnx
-└── AudioInputDevice (audio/audio_input_device.cpp)
-    ├── Synthetic (file playback for testing)
-    └── Windows WASAPI (live microphone)
+    ├── WhisperBackend (asr/whisper_backend.cpp)
+    │   └── Uses: models/ggml-*.bin
+    ├── ContinuousFrameAnalyzer (diar/speaker_cluster.cpp)
+    │   └── Uses: models/campplus_voxceleb.onnx
+    └── AudioInputDevice (audio/audio_input_device.cpp)
+        ├── Synthetic (file playback for testing)
+        │   ├── Windows: WASAPI playback (win/windows_wasapi_out.cpp)
+        │   └── macOS: CoreAudio playback (mac/coreaudio_output.mm)
+        ├── Windows: WASAPI capture (win/audio_input_device_windows.cpp)
+        └── macOS: CoreAudio capture (mac/audio_input_device_macos.mm)
 ```
+
+## Other Test Programs
+
+### test_audio_device
+Tests audio device enumeration and basic capture:
+```bash
+# macOS
+./build/macos-debug/test_audio_device
+
+# Windows
+.\build\Debug\test_audio_device.exe
+```
+
+Use this to debug microphone access issues or list available devices.
+
+### Archived Tests
+Historical tests from diarization research (Phase 2-3) are in `tests/archive/`.
+These are not built by default and are kept for reference only.
 
 ## Configuration Defaults
 

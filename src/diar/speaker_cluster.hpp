@@ -102,15 +102,24 @@ public:
     
     // Configuration
     struct Config {
-        int hop_ms = 250;       // Extract embedding every 250ms (4 fps)
-        int window_ms = 1000;   // Use 1s window for each embedding
-        int history_sec = 60;   // Keep last 60 seconds of frames
-        EmbeddingMode embedding_mode = EmbeddingMode::NeuralONNX;  // Use neural embeddings
-        std::string onnx_model_path = "models/campplus_voxceleb.onnx";  // CAMPlus (better than WeSpeaker)
-        bool verbose = false;
+        int hop_ms;       // Extract embedding every 250ms (4 fps)
+        int window_ms;   // Use 1s window for each embedding
+        int history_sec;   // Keep last 60 seconds of frames
+        EmbeddingMode embedding_mode;  // Use neural embeddings
+        std::string onnx_model_path;  // CAMPlus (better than WeSpeaker)
+        bool verbose;
+        
+        Config() 
+            : hop_ms(250)
+            , window_ms(1000)
+            , history_sec(60)
+            , embedding_mode(EmbeddingMode::NeuralONNX)
+            , onnx_model_path("models/campplus_voxceleb.onnx")
+            , verbose(false)
+        {}
     };
-    
-    ContinuousFrameAnalyzer(int sample_rate, const Config& config = Config());
+
+    explicit ContinuousFrameAnalyzer(int sample_rate, const Config& config);
     ~ContinuousFrameAnalyzer();
     
     // Add audio chunk to internal buffer and extract new frames

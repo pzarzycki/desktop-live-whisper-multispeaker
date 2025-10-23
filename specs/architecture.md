@@ -39,9 +39,12 @@
 |-----------|-----------|--------|
 | **ASR** | Whisper tiny.en (75MB) | ✅ Production |
 | **Speaker Embeddings** | WeSpeaker ResNet34 ONNX | ✅ Production |
-| **Audio Capture** | WASAPI (Windows) | ✅ Production |
-| **GUI Framework** | Dear ImGui + DirectX 11 | ✅ Production |
+| **Audio Capture** | WASAPI (Windows), CoreAudio (macOS) | ✅ Production |
+| **GPU Acceleration** | Metal (macOS), DirectX 11 (Windows) | ✅ Production |
+| **BLAS Operations** | Accelerate (macOS), OpenBLAS (Windows) | ✅ Production |
+| **GUI Framework** | Dear ImGui + DirectX 11/Metal | ✅ Production |
 | **Build System** | CMake 3.24+ | ✅ Working |
+| **Platforms** | macOS 11.0+, Windows 10/11 | ✅ Both supported |
 | **License** | MIT (ImGui) | ✅ Commercial-friendly |
 
 ---

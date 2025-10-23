@@ -79,8 +79,8 @@ int main(int argc, char** argv) {
     config.model_path = model_path;
     config.language = "en";
     config.n_threads = 0;  // Auto
-    config.buffer_duration_s = 3;  // 3 seconds for faster response
-    config.overlap_duration_s = 1;  // 1 second overlap
+    config.buffer_duration_s = 3;  // 3s buffer
+    config.overlap_duration_s = 1;  // 1s overlap
     config.enable_diarization = true;
     config.max_speakers = 2;
     config.speaker_threshold = 0.35f;

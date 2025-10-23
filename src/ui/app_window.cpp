@@ -2,9 +2,11 @@
 // Main application window implementation
 
 #include "app_window.hpp"
+#include "audio/audio_input_device.hpp"
 #include "imgui.h"
 #include <sstream>
 #include <iomanip>
+#include <iostream>
 
 // Speaker colors (Blue and Red)
 static const ImVec4 SPEAKER_0_COLOR = ImVec4(0.29f, 0.62f, 1.0f, 1.0f);  // #4A9EFF
@@ -13,43 +15,14 @@ static const ImVec4 SPEAKER_2_COLOR = ImVec4(0.31f, 0.80f, 0.77f, 1.0f); // #4EC
 static const ImVec4 SPEAKER_3_COLOR = ImVec4(1.0f, 0.90f, 0.43f, 1.0f);  // #FFE66D
 
 AppWindow::AppWindow() {
-    // TODO: Re-enable once controller is fully implemented
-    // controller_ = std::make_unique<app::TranscriptionController>();
-    
-    // Subscribe to controller events
-    /*
-    controller_->subscribe_to_chunks([this](const app::TranscriptionChunk& chunk) {
-        TranscriptChunk ui_chunk;
-        ui_chunk.id = chunk.id;
-        ui_chunk.text = chunk.text;
-        ui_chunk.speaker_id = chunk.speaker_id;
-        ui_chunk.timestamp_ms = chunk.timestamp_ms;
-        ui_chunk.confidence = chunk.speaker_confidence;
-        OnChunkReceived(ui_chunk);
-    });
-
-    controller_->subscribe_to_reclassification(
-        [this](const app::SpeakerReclassification& recl) {
-            OnSpeakerReclassified(recl.chunk_ids, 
-                                  recl.old_speaker_id, 
-                                  recl.new_speaker_id);
-        });
-
-    controller_->subscribe_to_status([this](const app::TranscriptionStatus& status) {
-        OnStatusChanged(status.elapsed_ms, 
-                        status.chunks_emitted, 
-                        status.reclassifications_count);
-    });
-    */
+    // Create controller
+    controller_ = std::make_unique<core::TranscriptionController>();
 }
 
 AppWindow::~AppWindow() {
-    // TODO: Re-enable once controller is fully implemented
-    /*
     if (is_recording_) {
-        controller_->stop_transcription();
+        controller_->stop();
     }
-    */
 }
 
 void AppWindow::Render() {
@@ -231,37 +204,122 @@ void AppWindow::RenderStatusBar() {
 }
 
 void AppWindow::OnStartStopClicked() {
-    // TODO: Re-enable once controller is fully implemented
     if (is_recording_) {
-        // controller_->stop_transcription();
+        // Stop recording
+        controller_->stop();
+        audio_device_.reset();
         is_recording_ = false;
         status_text_ = "Stopped";
     } else {
-        /*
-        app::TranscriptionConfig config;
-        config.whisper_model = whisper_model_;
+        // Configure controller
+        core::TranscriptionController::Config config;
+        config.model_path = whisper_model_;  // Just the model name, not the path
+        config.language = "en";
+        config.n_threads = 0;  // Auto
+        config.buffer_duration_s = 3;  // 3s buffer
+        config.overlap_duration_s = 1;  // 1s overlap
+        config.enable_diarization = true;
         config.max_speakers = max_speakers_;
         config.speaker_threshold = speaker_threshold_;
-        config.enable_reclassification = true;
         
-        // TODO: Add synthetic audio support to config
+        // Set up callbacks
+        config.on_segment = [this](const core::TranscriptionSegment& seg) {
+            TranscriptChunk chunk;
+            chunk.id = seg.start_ms;  // Use timestamp as ID
+            chunk.text = seg.text;
+            chunk.speaker_id = seg.speaker_id;
+            chunk.timestamp_ms = seg.start_ms;
+            chunk.confidence = 1.0f;  // Controller doesn't expose confidence yet
+            OnChunkReceived(chunk);
+        };
         
-        if (controller_->start_transcription(config)) {
-            is_recording_ = true;
-            status_text_ = "Recording...";
-        } else {
-            status_text_ = "Failed to start recording";
+        config.on_status = [this](const std::string& msg, bool is_error) {
+            if (is_error) {
+                std::cerr << "[ERROR] " << msg << "\n";
+                status_text_ = "Error: " + msg;
+            } else {
+                status_text_ = msg;
+            }
+        };
+        
+        // Initialize controller
+        std::cout << "[GUI] Initializing controller with model: " << config.model_path << "\n";
+        std::cout << "[GUI] Max speakers: " << config.max_speakers << ", threshold: " << config.speaker_threshold << "\n";
+        if (!controller_->initialize(config)) {
+            std::cout << "[GUI ERROR] Controller initialization failed!\n";
+            status_text_ = "Failed to initialize controller";
+            return;
         }
-        */
-        // For now, just toggle the UI state
+        std::cout << "[GUI] Controller initialized successfully\n";
+        
+        // Create audio device
+        std::cout << "[GUI] Creating audio device (synthetic=" << use_synthetic_audio_ << ")\n";
+        if (use_synthetic_audio_) {
+            audio_device_ = audio::AudioInputFactory::create_device("synthetic");
+        } else {
+            // TODO: Add real microphone support
+            audio_device_ = audio::AudioInputFactory::create_device("platform");
+        }
+        
+        if (!audio_device_) {
+            std::cout << "[GUI ERROR] Failed to create audio device!\n";
+            status_text_ = "Failed to create audio device";
+            return;
+        }
+        std::cout << "[GUI] Audio device created\n";
+        
+        // Configure audio device
+        audio::AudioInputConfig audio_config;
+        if (use_synthetic_audio_) {
+            audio_config.device_id = "synthetic";
+            audio_config.synthetic_file_path = audio_file_path_;
+            audio_config.synthetic_playback = true;
+            audio_config.synthetic_loop = false;
+            std::cout << "[GUI] Using synthetic audio file: " << audio_file_path_ << "\n";
+        } else {
+            audio_config.device_id = "";  // Default device
+            std::cout << "[GUI] Using platform microphone\n";
+        }
+        audio_config.buffer_size_ms = 100;
+        
+        // Audio callback - feed to controller
+        bool init_ok = audio_device_->initialize(
+            audio_config,
+            [this](const int16_t* samples, size_t sample_count, int sample_rate, int channels) {
+                controller_->add_audio(samples, sample_count, sample_rate);
+            },
+            [this](const std::string& error, bool is_fatal) {
+                std::cerr << "[AUDIO ERROR] " << error << "\n";
+                if (is_fatal) {
+                    status_text_ = "Audio error: " + error;
+                }
+            }
+        );
+        
+        if (!init_ok) {
+            status_text_ = "Failed to initialize audio";
+            return;
+        }
+        
+        // Start everything
+        if (!controller_->start()) {
+            status_text_ = "Failed to start controller";
+            return;
+        }
+        
+        if (!audio_device_->start()) {
+            status_text_ = "Failed to start audio";
+            controller_->stop();
+            return;
+        }
+        
         is_recording_ = true;
-        status_text_ = "Recording... (controller not connected)";
+        status_text_ = "Recording...";
     }
 }
 
 void AppWindow::OnClearClicked() {
     transcript_chunks_.clear();
-    // controller_->clear_history();
     chunk_count_ = 0;
     reclassification_count_ = 0;
     elapsed_ms_ = 0;

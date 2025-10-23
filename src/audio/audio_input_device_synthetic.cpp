@@ -36,11 +36,13 @@ bool AudioInputDevice_Synthetic::initialize(
     }
     
     // Setup playback if requested
+#if defined(_WIN32) || defined(__APPLE__)
     if (config.synthetic_playback) {
         if (playback_out_.start(file_capture_.sample_rate(), 1)) {
             playback_enabled_ = true;
         }
     }
+#endif
     
     return true;
 }
@@ -74,10 +76,12 @@ void AudioInputDevice_Synthetic::stop() {
     is_capturing_.store(false);
     capture_thread_.reset();
     
+#if defined(_WIN32) || defined(__APPLE__)
     if (playback_enabled_) {
         playback_out_.stop();
         playback_enabled_ = false;
     }
+#endif
 }
 
 void AudioInputDevice_Synthetic::capture_thread_func() {
@@ -105,9 +109,11 @@ void AudioInputDevice_Synthetic::capture_thread_func() {
         }
         
         // Play to speakers if enabled
+#if defined(_WIN32) || defined(__APPLE__)
         if (playback_enabled_ && !chunk.empty()) {
             playback_out_.write(chunk.data(), chunk.size());
         }
+#endif
         
         // Call the audio callback
         if (audio_callback_) {

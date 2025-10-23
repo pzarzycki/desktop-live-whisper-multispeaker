@@ -8,7 +8,7 @@ Real-time speech transcription with speaker diarization for Windows and macOS.
 - ✅ **Speaker diarization** - identifies who spoke when
 - ✅ **Low latency** - first transcription in ~4 seconds
 - ✅ **Production-ready** - async streaming architecture, thoroughly tested
-- 🔧 **Multiplatform** - Windows (complete), macOS (in progress)
+- ✅ **Multiplatform** - Windows & macOS fully supported
 
 ## Performance
 
@@ -23,12 +23,52 @@ Real-time speech transcription with speaker diarization for Windows and macOS.
 
 See detailed setup instructions in [`docs/`](docs/) folder.
 
-**For Developers:** See [`specs/plan.md`](specs/plan.md) for project status and [`specs/architecture.md`](specs/architecture.md) for technical details.
+**For Developers:** See [`TESTING.md`](TESTING.md) for test instructions and [`specs/plan.md`](specs/plan.md) for project status.
 
-## Prerequisites (Windows)
+**Technical Details:** See [`specs/architecture.md`](specs/architecture.md) for complete system architecture.
 
-### Core Build Tools
+## Project Structure
 
+```
+desktop-live-whisper-multispeaker/
+├── apps/                          # Active test programs
+│   ├── test_transcription_controller.cpp  # PRIMARY TEST (uses TranscriptionController)
+│   ├── test_audio_device.cpp              # Audio device debugging
+│   └── test_controller_api.cpp            # Legacy API test (source only, not built)
+├── src/
+│   ├── app/                       # TranscriptionController implementation
+│   ├── asr/                       # Whisper ASR backend
+│   ├── audio/                     # Audio input/output
+│   │   ├── win/                   # Windows-specific (WASAPI)
+│   │   └── mac/                   # macOS-specific (CoreAudio)
+│   ├── core/                      # Core application logic
+│   ├── diar/                      # Speaker diarization (ONNX embeddings)
+│   └── ui/                        # ImGui-based GUI
+├── tests/
+│   └── archive/                   # Historical tests from research phases
+├── models/                        # AI models (downloaded separately)
+├── test_data/                     # Test audio files
+└── third_party/                   # Dependencies (whisper.cpp, imgui, onnxruntime)
+```
+
+## Prerequisites
+
+### macOS
+
+**Required:**
+- macOS 11.0 (Big Sur) or later
+- Xcode Command Line Tools: `xcode-select --install`
+- CMake 3.24+: `brew install cmake` or `uv tool install cmake`
+- Git (for submodules)
+
+**Build Toolchain:**
+- Clang/LLVM (included with Xcode Command Line Tools)
+- Metal framework (GPU acceleration, included with macOS)
+- Accelerate framework (BLAS operations, included with macOS)
+
+### Windows
+
+**Core Build Tools:**
 - CMake 3.24+
 - A C++ toolchain. Either:
   - Visual Studio 2022 with "Desktop development with C++" workload, or
@@ -36,26 +76,102 @@ See detailed setup instructions in [`docs/`](docs/) folder.
 - Windows 10/11 SDK (provides the Universal CRT headers like `ucrt\math.h`, `rc.exe`, `mt.exe`)
 - Optional: Ninja (faster single-config builds)
 
-### Qt 6 (Required for GUI Application)
+---
 
-**Download:** Visit [www.qt.io/download-qt-installer](https://www.qt.io/download-qt-installer) and download the Qt Online Installer.
+## Setup & Build
 
-**Quick Setup:**
-1. Run `qt-unified-windows-x64-online.exe`
-2. Select Qt 6.8.0 → MSVC 2022 64-bit + Qt Quick
-3. Install to `C:\Qt` (default)
+### macOS Setup
 
-**Or Automated CLI:**
+1. **Install dependencies:**
+   ```bash
+   # Install Xcode Command Line Tools (if not already installed)
+   xcode-select --install
+   
+   # Install CMake (choose one method)
+   brew install cmake
+   # OR using uv:
+   uv tool install cmake
+   ```
+
+2. **Clone repository with submodules:**
+   ```bash
+   git clone <repository-url>
+   cd desktop-live-whisper-multispeaker
+   git submodule update --init --recursive
+   ```
+
+3. **Download dependencies and models:**
+   ```bash
+   # Download ONNX Runtime for macOS
+   chmod +x scripts/download_onnxruntime_macos.sh
+   ./scripts/download_onnxruntime_macos.sh
+   
+   # Download models (Whisper + Speaker embedding)
+   chmod +x scripts/download_models.sh
+   ./scripts/download_models.sh
+   ```
+
+4. **Configure and build:**
+   ```bash
+   # Configure for debug
+   cmake --preset macos-debug
+   
+   # Or for release
+   cmake --preset macos-release
+   
+   # Build (use -j to parallelize)
+   cmake --build build/macos-debug -j 4
+   ```
+
+5. **Run test:**
+   ```bash
+   ./build/macos-debug/test_transcription \
+     models/ggml-tiny.en.bin \
+     test_data/Sean_Carroll_podcast.wav
+   ```
+
+**Expected Output:**
+- Real-time transcription with speaker labels ([S0], [S1])
+- Audio playback through speakers
+- Performance metrics (should be <1.0x realtime factor)
+- Zero dropped frames
+
+**Platform Features:**
+- ✅ CoreAudio for microphone input
+- ✅ Metal backend for GPU acceleration
+- ✅ Accelerate framework for BLAS operations
+- ✅ Universal binary support (arm64 + x86_64)
+- ✅ Audio playback in synthetic test mode
+
+**Available Test Programs:**
+- `test_transcription` - Main integration test (TranscriptionController + audio + diarization)
+- `test_audio_device` - Audio device enumeration and capture testing
+
+---
+
+### Windows Setup
+
+**Prerequisites:** Make sure you have Visual Studio Build Tools and CMake installed.
+
+**Build Commands:**
+
 ```powershell
-# From Downloads folder after downloading installer
-.\qt-unified-windows-x64-online.exe --root C:\Qt --accept-licenses --default-answer --confirm-command install qt.qt6.680.win64_msvc2022_64 qt.qt6.680.addons.qtdeclarative
+# Configure
+cmake --preset windows-debug  # or windows-release
+
+# Build
+cmake --build build/windows-debug -j 4
+
+# Run GUI application
+.\build\windows-debug\app_desktop_whisper.exe
+
+# Run tests
+.\build\windows-debug\test_transcription.exe models\ggml-tiny.en.bin test_data\Sean_Carroll_podcast.wav
 ```
 
-**Full Instructions:** See [docs/QUICK_START_GUI.md](docs/QUICK_START_GUI.md) for step-by-step installation and [docs/qt_setup.md](docs/qt_setup.md) for detailed configuration.
+**Note:** GUI uses Dear ImGui with DirectX 11 backend (no external dependencies needed).
 
-**Note:** Tests can build without Qt (use `tests-only-*` presets). GUI app requires Qt 6 with QML/Quick support.
-
-
+---
 
 ## Configure and run tests-only (no Qt)
 
