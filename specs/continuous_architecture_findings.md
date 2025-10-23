@@ -1,5 +1,48 @@
 # Continuous Streaming Architecture - Findings
 
+**Last Updated:** October 22, 2025
+
+## Platform Support Status
+
+### macOS Implementation ✅ COMPLETE
+
+**Architecture:**
+- **Audio Input**: CoreAudio/AudioQueue API (`src/audio/mac/audio_input_device_macos.mm`)
+- **GPU Acceleration**: Metal backend (via whisper.cpp)
+- **BLAS Operations**: Accelerate framework (Apple's optimized BLAS)
+- **Binary Format**: Universal binary (arm64 + x86_64)
+
+**Performance (30s Sean Carroll podcast):**
+- Real-time factor: **0.64x** (faster than realtime!)
+- Processing breakdown:
+  - Whisper: 20.17s (65%)
+  - Diarization: 0.81s (3%)
+  - Audio I/O: Minimal
+- Zero dropped frames
+- Memory usage: ~320 MB
+
+**Setup:**
+1. Install Xcode Command Line Tools
+2. Download ONNX Runtime for macOS (universal binary)
+3. Build with `cmake --preset macos-debug`
+4. Run tests with CoreAudio microphone or synthetic file input
+
+**Key Differences from Windows:**
+- Uses CoreAudio instead of WASAPI
+- Accelerate framework instead of OpenBLAS
+- Metal instead of DirectX for GPU
+- Audio playback disabled in synthetic mode (macOS-specific)
+
+### Windows Implementation ✅ COMPLETE
+
+**Architecture:**
+- **Audio Input**: WASAPI (`src/audio/windows/audio_input_device_wasapi.cpp`)
+- **GPU Acceleration**: DirectX 11 (ImGui rendering)
+- **BLAS Operations**: OpenBLAS (optional, third_party/openblas.windows/)
+- **Binary Format**: x64
+
+---
+
 ## Implementation Summary
 
 Implemented a **continuous streaming architecture** that eliminates fixed window boundaries:

@@ -3,7 +3,8 @@
 
 #pragma once
 
-// #include "app/transcription_controller.hpp"  // TODO: Re-enable once controller is implemented
+#include "core/transcription_controller.hpp"
+#include "audio/audio_input_device.hpp"
 #include <vector>
 #include <string>
 #include <memory>
@@ -28,7 +29,7 @@ private:
     bool is_recording_ = false;
     bool show_settings_ = false;  // Settings window visibility
     bool use_synthetic_audio_ = true;
-    char audio_file_path_[256] = "output/whisper_input_16k.wav";
+    char audio_file_path_[256] = "test_data/Sean_Carroll_podcast_16k.wav";
     char whisper_model_[64] = "tiny.en";
     int max_speakers_ = 2;
     float speaker_threshold_ = 0.35f;
@@ -50,8 +51,9 @@ private:
     int chunk_count_ = 0;
     int reclassification_count_ = 0;
 
-    // Controller (disabled until implementation is complete)
-    // std::unique_ptr<app::TranscriptionController> controller_;
+    // Controller and audio device
+    std::unique_ptr<core::TranscriptionController> controller_;
+    std::unique_ptr<audio::IAudioInputDevice> audio_device_;
 
     // UI rendering functions
     void RenderMainWindow();

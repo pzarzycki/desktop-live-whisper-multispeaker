@@ -15,15 +15,24 @@ namespace diar {
 class MelFeatureExtractor {
 public:
     struct Config {
-        int sample_rate = 16000;
-        int n_fft = 400;           // 25ms at 16kHz
-        int hop_length = 160;      // 10ms at 16kHz
-        int n_mels = 80;           // Number of mel bins
-        float fmin = 0.0f;
-        float fmax = 8000.0f;      // Nyquist frequency at 16kHz
+        int sample_rate;
+        int n_fft;           // 25ms at 16kHz
+        int hop_length;      // 10ms at 16kHz
+        int n_mels;           // Number of mel bins
+        float fmin;
+        float fmax;      // Nyquist frequency at 16kHz
+        
+        Config() 
+            : sample_rate(16000)
+            , n_fft(400)
+            , hop_length(160)
+            , n_mels(80)
+            , fmin(0.0f)
+            , fmax(8000.0f)
+        {}
     };
 
-    explicit MelFeatureExtractor(const Config& config = Config{});
+    explicit MelFeatureExtractor(const Config& config = Config());
     ~MelFeatureExtractor();
 
     /**

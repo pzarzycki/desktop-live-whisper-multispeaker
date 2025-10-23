@@ -14,7 +14,7 @@
 // AppViewController
 //-----------------------------------------------------------------------------------
 
-@interface AppViewController : NSViewController
+@interface AppViewController : NSViewController <MTKViewDelegate>
 @end
 
 @implementation AppViewController
@@ -134,6 +134,7 @@
     ImGui_ImplMetal_Shutdown();
     ImGui_ImplOSX_Shutdown();
     ImGui::DestroyContext();
+    [super dealloc];
 }
 
 @end

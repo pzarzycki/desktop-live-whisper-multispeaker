@@ -8,7 +8,7 @@ Real-time speech transcription with speaker diarization for Windows and macOS.
 - ✅ **Speaker diarization** - identifies who spoke when
 - ✅ **Low latency** - first transcription in ~4 seconds
 - ✅ **Production-ready** - async streaming architecture, thoroughly tested
-- 🔧 **Multiplatform** - Windows (complete), macOS (in progress)
+- ✅ **Multiplatform** - Windows & macOS fully supported
 
 ## Performance
 
@@ -23,12 +23,52 @@ Real-time speech transcription with speaker diarization for Windows and macOS.
 
 See detailed setup instructions in [`docs/`](docs/) folder.
 
-**For Developers:** See [`specs/plan.md`](specs/plan.md) for project status and [`specs/architecture.md`](specs/architecture.md) for technical details.
+**For Developers:** See [`TESTING.md`](TESTING.md) for test instructions and [`specs/plan.md`](specs/plan.md) for project status.
 
-## Prerequisites (Windows)
+**Technical Details:** See [`specs/architecture.md`](specs/architecture.md) for complete system architecture.
 
-### Core Build Tools
+## Project Structure
 
+```
+desktop-live-whisper-multispeaker/
+├── apps/                          # Active test programs
+│   ├── test_transcription_controller.cpp  # PRIMARY TEST (uses TranscriptionController)
+│   ├── test_audio_device.cpp              # Audio device debugging
+│   └── test_controller_api.cpp            # Legacy API test (source only, not built)
+├── src/
+│   ├── app/                       # TranscriptionController implementation
+│   ├── asr/                       # Whisper ASR backend
+│   ├── audio/                     # Audio input/output
+│   │   ├── win/                   # Windows-specific (WASAPI)
+│   │   └── mac/                   # macOS-specific (CoreAudio)
+│   ├── core/                      # Core application logic
+│   ├── diar/                      # Speaker diarization (ONNX embeddings)
+│   └── ui/                        # ImGui-based GUI
+├── tests/
+│   └── archive/                   # Historical tests from research phases
+├── models/                        # AI models (downloaded separately)
+├── test_data/                     # Test audio files
+└── third_party/                   # Dependencies (whisper.cpp, imgui, onnxruntime)
+```
+
+## Prerequisites
+
+### macOS
+
+**Required:**
+- macOS 11.0 (Big Sur) or later
+- Xcode Command Line Tools: `xcode-select --install`
+- CMake 3.24+: `brew install cmake` or `uv tool install cmake`
+- Git (for submodules)
+
+**Build Toolchain:**
+- Clang/LLVM (included with Xcode Command Line Tools)
+- Metal framework (GPU acceleration, included with macOS)
+- Accelerate framework (BLAS operations, included with macOS)
+
+### Windows
+
+**Core Build Tools:**
 - CMake 3.24+
 - A C++ toolchain. Either:
   - Visual Studio 2022 with "Desktop development with C++" workload, or
@@ -36,96 +76,189 @@ See detailed setup instructions in [`docs/`](docs/) folder.
 - Windows 10/11 SDK (provides the Universal CRT headers like `ucrt\math.h`, `rc.exe`, `mt.exe`)
 - Optional: Ninja (faster single-config builds)
 
-### Qt 6 (Required for GUI Application)
+---
 
-**Download:** Visit [www.qt.io/download-qt-installer](https://www.qt.io/download-qt-installer) and download the Qt Online Installer.
+## Setup & Build
 
-**Quick Setup:**
-1. Run `qt-unified-windows-x64-online.exe`
-2. Select Qt 6.8.0 → MSVC 2022 64-bit + Qt Quick
-3. Install to `C:\Qt` (default)
+### macOS Setup
 
-**Or Automated CLI:**
-```powershell
-# From Downloads folder after downloading installer
-.\qt-unified-windows-x64-online.exe --root C:\Qt --accept-licenses --default-answer --confirm-command install qt.qt6.680.win64_msvc2022_64 qt.qt6.680.addons.qtdeclarative
+1. **Install dependencies:**
+   ```bash
+   # Install Xcode Command Line Tools (if not already installed)
+   xcode-select --install
+   
+   # Install CMake (choose one method)
+   brew install cmake
+   # OR using uv:
+   uv tool install cmake
+   ```
+
+2. **Clone repository with submodules:**
+   ```bash
+   git clone <repository-url>
+   cd desktop-live-whisper-multispeaker
+   git submodule update --init --recursive
+   ```
+
+3. **Download dependencies and models:**
+   ```bash
+   # Download ONNX Runtime for macOS
+   chmod +x scripts/download_onnxruntime_macos.sh
+   ./scripts/download_onnxruntime_macos.sh
+   
+   # Download models (Whisper + Speaker embedding)
+   chmod +x scripts/download_models.sh
+   ./scripts/download_models.sh
+   ```
+
+4. **Configure and build:**
+   ```bash
+   # Configure for debug
+   cmake --preset macos-debug
+   
+   # Or for release
+   cmake --preset macos-release
+   
+   # Build (use -j to parallelize)
+   cmake --build build/macos-debug -j 4
+   ```
+
+5. **Run the application:**
+   
+   **GUI Application:**
+   ```bash
+   # Launch GUI app
+   open build/macos-debug/app_desktop_whisper.app
+   # Or run directly from terminal to see logs:
+   ./build/macos-debug/app_desktop_whisper.app/Contents/MacOS/app_desktop_whisper
+   ```
+   
+   **CLI Test:**
+   ```bash
+   ./build/macos-debug/test_transcription \
+     tiny.en \
+     test_data/Sean_Carroll_podcast_16k.wav \
+     --limit-seconds 20
+   ```
+
+**Expected Output:**
+- Real-time transcription with speaker labels ([S0], [S1])
+- Audio playback through speakers
+- Performance metrics (should be <1.0x realtime factor)
+- Zero dropped frames
+
+**Platform Features:**
+- ✅ CoreAudio for microphone input
+- ✅ Metal backend for GPU acceleration
+- ✅ Accelerate framework for BLAS operations
+- ✅ Universal binary support (arm64 + x86_64)
+- ✅ Audio playback in synthetic test mode
+
+**Available Test Programs:**
+- `test_transcription` - Main integration test (TranscriptionController + audio + diarization)
+- `test_audio_device` - Audio device enumeration and capture testing
+
+---
+
+### Windows Setup
+
+1. **Install prerequisites:**
+   - Visual Studio 2022 (or Build Tools) with "Desktop development with C++"
+   - CMake 3.24+
+   - Git (for submodules)
+
+2. **Clone repository with submodules:**
+   ```powershell
+   git clone <repository-url>
+   cd desktop-live-whisper-multispeaker
+   git submodule update --init --recursive
+   ```
+
+3. **Download dependencies and models:**
+   ```powershell
+   # Download ONNX Runtime for Windows
+   .\scripts\download_onnxruntime.ps1
+   
+   # Download models (Whisper + Speaker embedding)
+   .\scripts\download_models.ps1
+   ```
+
+4. **Configure and build:**
+   ```powershell
+   # Configure for debug
+   cmake --preset windows-debug
+   
+   # Or for release
+   cmake --preset windows-release
+   
+   # Build (use -j to parallelize)
+   cmake --build build/windows-debug -j 4
+   ```
+
+5. **Run the application:**
+   
+   **GUI Application:**
+   ```powershell
+   # Launch GUI app
+   .\build\windows-debug\app_desktop_whisper.exe
+   ```
+   
+   **CLI Test:**
+   ```powershell
+   .\build\windows-debug\test_transcription.exe tiny.en test_data\Sean_Carroll_podcast.wav --limit-seconds 20
+   ```
+
+**Platform Features:**
+- ✅ WASAPI for microphone input
+- ✅ DirectX 11 backend for GPU-accelerated rendering
+- ✅ ImGui-based GUI (no external UI framework needed)
+- ✅ Audio playback in synthetic test mode
+
+---
+
+---
+
+## Testing
+
+See [`TESTING.md`](TESTING.md) for detailed test instructions.
+
+**Quick test on macOS:**
+```bash
+./build/macos-debug/test_transcription \
+  tiny.en \
+  test_data/Sean_Carroll_podcast_16k.wav \
+  --limit-seconds 20
 ```
 
-**Full Instructions:** See [docs/QUICK_START_GUI.md](docs/QUICK_START_GUI.md) for step-by-step installation and [docs/qt_setup.md](docs/qt_setup.md) for detailed configuration.
+**Quick test on Windows:**
+```powershell
+.\build\windows-debug\test_transcription.exe tiny.en test_data\Sean_Carroll_podcast.wav --limit-seconds 20
+```
 
-**Note:** Tests can build without Qt (use `tests-only-*` presets). GUI app requires Qt 6 with QML/Quick support.
-
-
-
-## Configure and run tests-only (no Qt)
-
-This path configures only the failing integration tests to drive TDD.
-
-1. Configure
-
-   - Use the Visual Studio generator preset:
-     - `cmake --preset tests-only-debug`
-
-2. Build
-
-   - `cmake --build --preset build-tests-only-debug`
-
-3. Run tests
-
-   - `ctest --test-dir build/tests-only-debug -C Debug --output-on-failure`
-
-Expected: tests currently fail (they return exit code 1 by design). We'll implement features to turn them green.
-
-## Configure full app (Qt via vcpkg, pending)
-
-Once vcpkg is available at `${repo}/vcpkg`:
-
-1. Configure
-
-- `cmake --preset windows-debug`
-
-1. Build
-
-- `cmake --build --preset build-debug`
-
-1. Run app
-
-- Executable will be under `build/windows-debug`.
-
-If you don't have `vcpkg` yet, clone it into the repo root:
-
-- `git clone https://github.com/microsoft/vcpkg.git vcpkg`
+---
 
 ## Troubleshooting
 
+See [`TESTING.md`](TESTING.md) for common issues and solutions.
 
-## Next steps
+**Common Issues:**
+- Model not found: Run the download scripts in `scripts/`
+- Audio device errors: Check microphone permissions (macOS) or device availability (Windows)
+- Build errors: Ensure all prerequisites are installed
 
+---
 
-### Whisper (Option B: vendored third_party)
+## Development
 
-1. Add whisper.cpp as a submodule:
+See [`specs/architecture.md`](specs/architecture.md) for system architecture and design decisions.
 
-   - `git submodule add https://github.com/ggerganov/whisper.cpp third_party/whisper.cpp`
-   - `git submodule update --init --recursive`
+**Key Components:**
+- `TranscriptionController` - Main streaming transcription API
+- `WhisperBackend` - Whisper.cpp integration
+- `SpeakerClusterer` - ONNX-based speaker embeddings
+- `AudioInputDevice` - Platform-specific audio capture
 
-2. Download a GGUF model and place under `models/`, e.g.:
-
-   - `models/small.en.gguf` (recommended to start)
-
-3. Build console transcriber (tests-only preset is fine):
-
-   - `cmake --preset tests-only-debug`
-   - `cmake --build --preset build-tests-only-debug`
-
-4. Run with a specific device ID:
-
-    - List devices (if a device lister is present):
-       - app_list_devices.exe
-    - Example run (mic mode, 10s window):
-       - app_transcribe_file.exe --device "{0.0.1.00000000}.{8d279ef3-e64f-477d-9aab-c253a44360ea}" --limit-seconds 10 --model third_party/whisper.cpp/models/ggml-small.en.bin
-
-    Preferred test microphone (saved in test_data/preferred_mic.txt):
-    - 2: Desktop Microphone (Microsoft® LifeCam HD-3000)
-    - ID: {0.0.1.00000000}.{8d279ef3-e64f-477d-9aab-c253a44360ea}
+**Build Presets:**
+- `macos-debug` / `macos-release` - macOS Universal builds
+- `windows-debug` / `windows-release` - Windows x64 builds
 

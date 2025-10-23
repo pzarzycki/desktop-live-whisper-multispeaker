@@ -3,8 +3,8 @@
 
 #ifdef _WIN32
 #include "win/audio_input_device_windows.hpp"
-#elif __APPLE__
-// #include "mac/audio_input_device_macos.hpp"  // TODO
+#elif defined(__APPLE__)
+#include "mac/audio_input_device_macos.hpp"
 #endif
 
 namespace audio {
@@ -16,10 +16,10 @@ std::vector<AudioDeviceInfo> AudioInputFactory::enumerate_devices() {
     // Add Windows WASAPI devices
     auto windows_devices = AudioInputDevice_Windows::enumerate_windows_devices();
     devices.insert(devices.end(), windows_devices.begin(), windows_devices.end());
-#elif __APPLE__
+#elif defined(__APPLE__)
     // Add macOS CoreAudio devices
-    // auto macos_devices = AudioInputDevice_macOS::enumerate_macos_devices();
-    // devices.insert(devices.end(), macos_devices.begin(), macos_devices.end());
+    auto macos_devices = AudioInputDevice_macOS::enumerate_macos_devices();
+    devices.insert(devices.end(), macos_devices.begin(), macos_devices.end());
 #endif
     
     // Always add synthetic device
@@ -45,9 +45,8 @@ std::unique_ptr<IAudioInputDevice> AudioInputFactory::create_device(const std::s
     // Platform-specific default or specific device
 #ifdef _WIN32
     return std::make_unique<AudioInputDevice_Windows>();
-#elif __APPLE__
-    // return std::make_unique<AudioInputDevice_macOS>();
-    return nullptr;  // TODO
+#elif defined(__APPLE__)
+    return std::make_unique<AudioInputDevice_macOS>();
 #else
     #error "Unsupported platform"
 #endif
@@ -56,9 +55,10 @@ std::unique_ptr<IAudioInputDevice> AudioInputFactory::create_device(const std::s
 std::string AudioInputFactory::get_default_device_id() {
 #ifdef _WIN32
     auto devices = AudioInputDevice_Windows::enumerate_windows_devices();
-#elif __APPLE__
-    // auto devices = AudioInputDevice_macOS::enumerate_macos_devices();
-    std::vector<AudioDeviceInfo> devices;  // TODO
+#elif defined(__APPLE__)
+    auto devices = AudioInputDevice_macOS::enumerate_macos_devices();
+#else
+    std::vector<AudioDeviceInfo> devices;
 #endif
     
     for (const auto& dev : devices) {

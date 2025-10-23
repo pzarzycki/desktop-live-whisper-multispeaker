@@ -2,7 +2,13 @@
 
 #include "audio_input_device.hpp"
 #include "file_capture.hpp"
-#include "windows_wasapi_out.hpp"
+
+#ifdef _WIN32
+#include "win/windows_wasapi_out.hpp"
+#elif __APPLE__
+#include "mac/coreaudio_output.hpp"
+#endif
+
 #include <vector>
 #include <thread>
 #include <atomic>
@@ -47,9 +53,15 @@ private:
     // Use existing file capture implementation
     FileCapture file_capture_;
     
-    // Optional playback
+#if defined(_WIN32) || defined(__APPLE__)
+    // Platform-specific playback
+    #ifdef _WIN32
     WindowsWasapiOut playback_out_;
+    #else
+    CoreAudioOutput playback_out_;
+    #endif
     bool playback_enabled_ = false;
+#endif
     
     // Threading
     std::unique_ptr<std::thread> capture_thread_;

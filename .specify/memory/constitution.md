@@ -71,7 +71,7 @@ predictable.
 
 Prefer a small toolkit, measure before optimizing, and keep the runtime lean.
 
-- Language: C++20; Build: CMake; UI: Qt 6; Package management: vcpkg (Windows).
+- Language: C++20; Build: CMake; UI: Dear ImGui; Dependencies: git submodules (whisper.cpp, imgui).
 - Prefer local inference backends (e.g., whisper.cpp with GGML/GGUF models); cloud calls require an
   explicit product need and a toggle.
 - Logging MUST be lightweight and structured; avoid noisy logs in the real-time path. Use a ring
@@ -83,7 +83,7 @@ Rationale: A smaller system is easier to ship fast and keep responsive.
 ## Technology & Architecture Constraints
 
 - Language & Build: C++20, CMake ≥ 3.24. Use MSVC v143 on Windows; Clang or AppleClang on macOS.
-- UI: Qt 6.6+ (Widgets or QML—choose per feature, but keep one across the app unless justified).
+- UI: Dear ImGui (MIT license, immediate mode GUI, native platform backends: DirectX 11/Metal).
 - Audio I/O: Windows = WASAPI; macOS = CoreAudio (secondary phase). Keep an abstraction to hide
   backend differences.
 - Model Runtime: Prefer whisper.cpp (static or submodule) with GGUF models. Support streaming
