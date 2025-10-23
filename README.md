@@ -173,75 +173,49 @@ cmake --build build/windows-debug -j 4
 
 ---
 
-## Configure and run tests-only (no Qt)
+---
 
-This path configures only the failing integration tests to drive TDD.
+## Testing
 
-1. Configure
+See [`TESTING.md`](TESTING.md) for detailed test instructions.
 
-   - Use the Visual Studio generator preset:
-     - `cmake --preset tests-only-debug`
+**Quick test on macOS:**
+```bash
+./build/macos-debug/test_transcription \
+  tiny.en \
+  test_data/Sean_Carroll_podcast_16k.wav \
+  --limit-seconds 20
+```
 
-2. Build
+**Quick test on Windows:**
+```powershell
+.\build\windows-debug\test_transcription.exe tiny.en test_data\Sean_Carroll_podcast.wav --limit-seconds 20
+```
 
-   - `cmake --build --preset build-tests-only-debug`
-
-3. Run tests
-
-   - `ctest --test-dir build/tests-only-debug -C Debug --output-on-failure`
-
-Expected: tests currently fail (they return exit code 1 by design). We'll implement features to turn them green.
-
-## Configure full app (Qt via vcpkg, pending)
-
-Once vcpkg is available at `${repo}/vcpkg`:
-
-1. Configure
-
-- `cmake --preset windows-debug`
-
-1. Build
-
-- `cmake --build --preset build-debug`
-
-1. Run app
-
-- Executable will be under `build/windows-debug`.
-
-If you don't have `vcpkg` yet, clone it into the repo root:
-
-- `git clone https://github.com/microsoft/vcpkg.git vcpkg`
+---
 
 ## Troubleshooting
 
+See [`TESTING.md`](TESTING.md) for common issues and solutions.
 
-## Next steps
+**Common Issues:**
+- Model not found: Run the download scripts in `scripts/`
+- Audio device errors: Check microphone permissions (macOS) or device availability (Windows)
+- Build errors: Ensure all prerequisites are installed
 
+---
 
-### Whisper (Option B: vendored third_party)
+## Development
 
-1. Add whisper.cpp as a submodule:
+See [`specs/architecture.md`](specs/architecture.md) for system architecture and design decisions.
 
-   - `git submodule add https://github.com/ggerganov/whisper.cpp third_party/whisper.cpp`
-   - `git submodule update --init --recursive`
+**Key Components:**
+- `TranscriptionController` - Main streaming transcription API
+- `WhisperBackend` - Whisper.cpp integration
+- `SpeakerClusterer` - ONNX-based speaker embeddings
+- `AudioInputDevice` - Platform-specific audio capture
 
-2. Download a GGUF model and place under `models/`, e.g.:
-
-   - `models/small.en.gguf` (recommended to start)
-
-3. Build console transcriber (tests-only preset is fine):
-
-   - `cmake --preset tests-only-debug`
-   - `cmake --build --preset build-tests-only-debug`
-
-4. Run with a specific device ID:
-
-    - List devices (if a device lister is present):
-       - app_list_devices.exe
-    - Example run (mic mode, 10s window):
-       - app_transcribe_file.exe --device "{0.0.1.00000000}.{8d279ef3-e64f-477d-9aab-c253a44360ea}" --limit-seconds 10 --model third_party/whisper.cpp/models/ggml-small.en.bin
-
-    Preferred test microphone (saved in test_data/preferred_mic.txt):
-    - 2: Desktop Microphone (Microsoft® LifeCam HD-3000)
-    - ID: {0.0.1.00000000}.{8d279ef3-e64f-477d-9aab-c253a44360ea}
+**Build Presets:**
+- `macos-debug` / `macos-release` - macOS Universal builds
+- `windows-debug` / `windows-release` - Windows x64 builds
 
