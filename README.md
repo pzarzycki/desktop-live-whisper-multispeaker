@@ -123,11 +123,22 @@ desktop-live-whisper-multispeaker/
    cmake --build build/macos-debug -j 4
    ```
 
-5. **Run test:**
+5. **Run the application:**
+   
+   **GUI Application:**
+   ```bash
+   # Launch GUI app
+   open build/macos-debug/app_desktop_whisper.app
+   # Or run directly from terminal to see logs:
+   ./build/macos-debug/app_desktop_whisper.app/Contents/MacOS/app_desktop_whisper
+   ```
+   
+   **CLI Test:**
    ```bash
    ./build/macos-debug/test_transcription \
-     models/ggml-tiny.en.bin \
-     test_data/Sean_Carroll_podcast.wav
+     tiny.en \
+     test_data/Sean_Carroll_podcast_16k.wav \
+     --limit-seconds 20
    ```
 
 **Expected Output:**
@@ -151,25 +162,57 @@ desktop-live-whisper-multispeaker/
 
 ### Windows Setup
 
-**Prerequisites:** Make sure you have Visual Studio Build Tools and CMake installed.
+1. **Install prerequisites:**
+   - Visual Studio 2022 (or Build Tools) with "Desktop development with C++"
+   - CMake 3.24+
+   - Git (for submodules)
 
-**Build Commands:**
+2. **Clone repository with submodules:**
+   ```powershell
+   git clone <repository-url>
+   cd desktop-live-whisper-multispeaker
+   git submodule update --init --recursive
+   ```
 
-```powershell
-# Configure
-cmake --preset windows-debug  # or windows-release
+3. **Download dependencies and models:**
+   ```powershell
+   # Download ONNX Runtime for Windows
+   .\scripts\download_onnxruntime.ps1
+   
+   # Download models (Whisper + Speaker embedding)
+   .\scripts\download_models.ps1
+   ```
 
-# Build
-cmake --build build/windows-debug -j 4
+4. **Configure and build:**
+   ```powershell
+   # Configure for debug
+   cmake --preset windows-debug
+   
+   # Or for release
+   cmake --preset windows-release
+   
+   # Build (use -j to parallelize)
+   cmake --build build/windows-debug -j 4
+   ```
 
-# Run GUI application
-.\build\windows-debug\app_desktop_whisper.exe
+5. **Run the application:**
+   
+   **GUI Application:**
+   ```powershell
+   # Launch GUI app
+   .\build\windows-debug\app_desktop_whisper.exe
+   ```
+   
+   **CLI Test:**
+   ```powershell
+   .\build\windows-debug\test_transcription.exe tiny.en test_data\Sean_Carroll_podcast.wav --limit-seconds 20
+   ```
 
-# Run tests
-.\build\windows-debug\test_transcription.exe models\ggml-tiny.en.bin test_data\Sean_Carroll_podcast.wav
-```
-
-**Note:** GUI uses Dear ImGui with DirectX 11 backend (no external dependencies needed).
+**Platform Features:**
+- ✅ WASAPI for microphone input
+- ✅ DirectX 11 backend for GPU-accelerated rendering
+- ✅ ImGui-based GUI (no external UI framework needed)
+- ✅ Audio playback in synthetic test mode
 
 ---
 
