@@ -1,6 +1,6 @@
 # Continuous Streaming Architecture - Findings
 
-**Last Updated:** October 22, 2025
+**Last Updated:** October 23, 2025
 
 ## Platform Support Status
 
@@ -567,6 +567,21 @@ If Titanet also fails:
 
 **Assessment:** Infrastructure is complete and production-ready. Just need better model.
 
+### PDB Files in macOS Library (2025-10-23)
+
+**Finding:** .pdb debug symbol files (Windows-specific) were found in `third_party/onnxruntime-macos/lib/`. This indicates a packaging error in the ONNX Runtime macOS distribution, as .pdb files are not used on macOS.
+
+**Impact:** These large files (290+ MB) were accidentally committed to Git, causing push failures due to GitHub's size limits.
+
+**Resolution:** 
+- Added `*.pdb` to `.gitignore` to prevent future tracking
+- Removed tracked .pdb files from Git index
+- Files remain on disk in `third_party/` as they may be needed for debugging
+
+**Recommendation:** Verify ONNX Runtime macOS package integrity and consider switching to a different distribution if this issue persists.
+
+### References
+
 ### Code Quality
 
 **Well-designed components:**
@@ -654,5 +669,5 @@ If Titanet also fails:
 ---
 
 **Document Status:** Living document - updated after Phase 2c completion  
-**Last Update:** 2025-10-07  
+**Last Update:** 2025-10-23  
 **Next Update:** After Phase 2d (Titanet Large integration)
