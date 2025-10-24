@@ -29,9 +29,21 @@ set(BUILD_SHARED_LIBS OFF CACHE BOOL "Build static libs" FORCE)
 add_subdirectory(third_party/whisper.cpp EXCLUDE_FROM_ALL)
 
 # ONNX Runtime for speaker embeddings
-set(ONNXRUNTIME_ROOT "${CMAKE_SOURCE_DIR}/third_party/onnxruntime")
+if(WIN32)
+    set(ONNXRUNTIME_ROOT "${CMAKE_SOURCE_DIR}/third_party/onnxruntime-windows")
+elseif(APPLE)
+    set(ONNXRUNTIME_ROOT "${CMAKE_SOURCE_DIR}/third_party/onnxruntime-macos")
+else()
+    set(ONNXRUNTIME_ROOT "${CMAKE_SOURCE_DIR}/third_party/onnxruntime")
+endif()
 if (NOT EXISTS "${ONNXRUNTIME_ROOT}/include")
-    message(FATAL_ERROR "ONNX Runtime not found. Run: ./scripts/download_onnxruntime.ps1")
+    if(WIN32)
+        message(FATAL_ERROR "ONNX Runtime not found. Run: .\\scripts\\download_onnxruntime.ps1")
+    elseif(APPLE)
+        message(FATAL_ERROR "ONNX Runtime not found. Run: ./scripts/download_onnxruntime_macos.sh")
+    else()
+        message(FATAL_ERROR "ONNX Runtime not found. Please download manually for your platform.")
+    endif()
 endif()
 
 # Dear ImGui for GUI

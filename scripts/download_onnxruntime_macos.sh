@@ -6,7 +6,7 @@ set -e
 VERSION="1.20.1"
 URL="https://github.com/microsoft/onnxruntime/releases/download/v${VERSION}/onnxruntime-osx-universal2-${VERSION}.tgz"
 OUTPUT="third_party/onnxruntime-osx-universal2-${VERSION}.tgz"
-EXTRACT_DIR="third_party/onnxruntime"
+EXTRACT_DIR="third_party/onnxruntime-macos"
 
 echo "Downloading ONNX Runtime v${VERSION} for macOS..."
 mkdir -p third_party

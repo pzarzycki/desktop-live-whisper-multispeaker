@@ -73,6 +73,9 @@ void AppWindow::RenderControlPanel() {
     // Start/Stop button (large, colored)
     ImVec2 button_size(200, 50);
     
+    // Push rounded corner style for the main button
+    ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 8.0f);
+    
     if (is_recording_) {
         ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.8f, 0.2f, 0.2f, 1.0f));
         ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.9f, 0.3f, 0.3f, 1.0f));
@@ -89,6 +92,10 @@ void AppWindow::RenderControlPanel() {
     }
     
     ImGui::PopStyleColor(3);
+    ImGui::PopStyleVar(1);  // Pop the FrameRounding style
+    
+    // Push rounded corner style for the other buttons
+    ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 6.0f);
     
     // Clear button
     ImGui::SameLine();
@@ -101,6 +108,8 @@ void AppWindow::RenderControlPanel() {
     if (ImGui::Button("Settings...")) {
         show_settings_ = true;
     }
+    
+    ImGui::PopStyleVar(1);  // Pop the FrameRounding style for other buttons
 }
 
 void AppWindow::RenderTranscriptView() {
@@ -190,10 +199,15 @@ void AppWindow::RenderSettingsWindow() {
         ImGui::Spacing();
         ImGui::Separator();
         
+        // Push rounded corner style for the close button
+        ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 6.0f);
+        
         // Close button
         if (ImGui::Button("Close", ImVec2(120, 0))) {
             show_settings_ = false;
         }
+        
+        ImGui::PopStyleVar(1);  // Pop the FrameRounding style
     }
     ImGui::End();
 }

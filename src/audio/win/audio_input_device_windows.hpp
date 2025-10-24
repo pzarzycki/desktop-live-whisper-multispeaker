@@ -1,7 +1,7 @@
 #pragma once
 
 #include "../audio_input_device.hpp"
-#include "../windows_wasapi.hpp"
+#include "windows_wasapi.hpp"
 #include <thread>
 #include <atomic>
 #include <mutex>

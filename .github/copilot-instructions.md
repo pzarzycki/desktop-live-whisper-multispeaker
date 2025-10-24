@@ -25,9 +25,9 @@ Document there all important findings and changes to the architecture, tech stac
 ## Documenting
 
 Internal documentation, architecture, prograss tracking, etc: /spec
-User docuementation: /docs
+User documentation: /docs
 
-Project overview, advertisement, key information and annoucements: /README.md
+Project overview, advertisement, key information and annoucements: `/README.md`
 
 
 ## Browsing for functionality

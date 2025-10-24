@@ -2,7 +2,7 @@
 // This implementation intentionally avoids complex error handling and format negotiation.
 // It opens the default audio input device and pulls small chunks, converting to int16 mono.
 
-#include "audio/windows_wasapi.hpp"
+#include "windows_wasapi.hpp"
 #include <windows.h>
 #include <mmdeviceapi.h>
 #include <audioclient.h>

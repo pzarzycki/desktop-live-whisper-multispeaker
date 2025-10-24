@@ -1,4 +1,4 @@
-#include "audio/windows_wasapi_out.hpp"
+#include "windows_wasapi_out.hpp"
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <mmdeviceapi.h>

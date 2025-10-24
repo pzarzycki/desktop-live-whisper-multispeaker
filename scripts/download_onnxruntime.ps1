@@ -2,7 +2,7 @@
 $version = "1.20.1"
 $url = "https://github.com/microsoft/onnxruntime/releases/download/v$version/onnxruntime-win-x64-$version.zip"
 $output = "third_party/onnxruntime-win-x64-$version.zip"
-$extract_dir = "third_party/onnxruntime"
+$extract_dir = "third_party/onnxruntime-windows"
 
 Write-Host "Downloading ONNX Runtime v$version..."
 New-Item -ItemType Directory -Force -Path "third_party" | Out-Null
